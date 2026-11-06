@@ -68,7 +68,7 @@ CREATE TABLE `prof` (
   `id_prof` int NOT NULL AUTO_INCREMENT,
   `id_user` varchar(100) NOT NULL,
   `id_Dep` int DEFAULT NULL,
-  `bureau` varchar(50) DEFAULT NULL,
+  `grade` varchar(50) DEFAULT NULL,
   PRIMARY KEY (`id_prof`),
   UNIQUE KEY `uq_prof_user` (`id_user`),
   KEY `id_Dep` (`id_Dep`),
