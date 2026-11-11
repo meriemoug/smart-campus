@@ -429,7 +429,7 @@ try {
         arrow.textContent = '▾';       // Change la flèche vers le bas
     }
 }
-    <script>
+    </script>
 
 </body>
 </html>

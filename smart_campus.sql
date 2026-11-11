@@ -414,6 +414,20 @@ CREATE TABLE `user` (
   `role` enum('etudiant','prof','scolarite') NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
+
+
+CREATE TABLE `consultation` (
+  `id_consult` INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `id_prof` INT(11) NOT NULL,
+  `date_consult` DATE NOT NULL,
+  `heure_consult` VARCHAR(50) NOT NULL,
+  `bureau` VARCHAR(100) NOT NULL,
+  `email_contact` VARCHAR(150) NOT NULL,
+  `note` TEXT DEFAULT NULL,
+  CONSTRAINT fk_consult_prof FOREIGN KEY (`id_prof`) REFERENCES `prof` (`id_prof`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 --
 -- Dumping data for table `user`
 --

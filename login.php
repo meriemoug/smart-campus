@@ -1,6 +1,7 @@
 <?php
 session_start();
 
+
 $host = 'localhost';
 $db   = 'smart_campus';
 $user = 'root';
