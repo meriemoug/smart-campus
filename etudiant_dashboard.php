@@ -12,9 +12,11 @@ $error = '';
 
 try {
     // Annonces destinées aux étudiants, générales ou de leur section
-    $st = $pdo->prepare("SELECT titre, det, Date_Pub FROM annonce
-                         WHERE cible IN ('tous','etudiants') AND (id_Sec IS NULL OR id_Sec = ?)
-                         ORDER BY Date_Pub DESC, id_Anm DESC");
+    $st = $pdo->prepare("SELECT a.titre, a.det, a.Date_Pub, u.nom, u.prenom, u.role
+                         FROM annonce a
+                         LEFT JOIN user u ON u.id_user = a.id_user
+                         WHERE a.cible IN ('tous','etudiants') AND (a.id_Sec IS NULL OR a.id_Sec = ?)
+                         ORDER BY a.Date_Pub DESC, a.id_Anm DESC");
     $st->execute([$etu['id_Sec']]);
     $annonces = $st->fetchAll(PDO::FETCH_ASSOC);
 
@@ -52,13 +54,24 @@ try {
     <?php if (empty($annonces)): ?>
       <div class="card"><p class="muted">Aucune annonce pour le moment.</p></div>
     <?php else: foreach ($annonces as $a):
-        $nouveau = (time() - strtotime($a['Date_Pub'])) <= 3 * 86400; ?>
+        $nouveau = (time() - strtotime($a['Date_Pub'])) <= 3 * 86400; 
+        if (($a['role'] ?? '') === 'prof') {
+            $icone  = '👨‍🏫';
+            $auteur = 'Enseignant : Pr. ' . $a['nom'] . ' ' . $a['prenom'];
+        } elseif (($a['role'] ?? '') === 'scolarite') {
+            $icone  = '🏛️';
+            $auteur = 'Scolarité';
+        } else {
+            $icone  = '📢';
+            $auteur = 'Administration';
+        }
+        ?>
       <article class="ann">
-        <div class="ann-icon" aria-hidden="true">📢</div>
+        <!--<div class="ann-icon" aria-hidden="true"><?php echo $icone; ?></div>-->
         <div>
           <h4><?php echo htmlspecialchars($a['titre']); ?><?php if ($nouveau): ?><span class="badge">Nouveau</span><?php endif; ?></h4>
           <p><?php echo htmlspecialchars($a['det']); ?></p>
-          <small class="muted">Publié le <?php echo date('d/m/Y', strtotime($a['Date_Pub'])); ?></small>
+          <small class="muted"><?php echo htmlspecialchars($auteur); ?> · Publié le <?php echo date('d/m/Y', strtotime($a['Date_Pub'])); ?></small>
         </div>
       </article>
     <?php endforeach; endif; ?>
