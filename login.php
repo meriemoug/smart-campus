@@ -50,13 +50,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $post_admin = strtolower($scol_data['post_Admin'] ?? '');
 
                         // Si c'est l'Admin Principal -> Tableau de bord Super Admin avec gestion des agents
-                        if (str_contains($post_admin, 'principal') || str_contains($post_admin, 'superadmin')) {
+                        if (str_contains($post_admin, 'principal')) {
                             $_SESSION['is_super_admin'] = true;
                             header('Location: admin_principal_dashboard.php');
                         } else {
                             // Agent de la scolarité classique
                             $_SESSION['is_super_admin'] = false;
-                            header('Location: admin_principal_dashboard.php');
+                            header('Location: gestion_profs.php');
                         }
                         exit();
 

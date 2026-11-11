@@ -23,7 +23,7 @@ try {
         $id_prof = trim($_POST['id_prof']);
         $nom = trim($_POST['nom']);
         $prenom = trim($_POST['prenom']);
-        $email = trim($_POST['email']);
+        $email = trim($_POST['email']?? NULL);
         $password = trim($_POST['password']);
         $grade = trim($_POST['grade']);
         $id_departement = !empty($_POST['id_Dep']) ? trim($_POST['id_Dep']) : null;
@@ -449,6 +449,46 @@ try {
         .dropdown-item:hover { background-color: var(--bg); }
         .dropdown-item.logout { background-color: var(--error); color: var(--on-error); text-align: center; }
         .dropdown-item.logout:hover { opacity: 0.9; }
+
+        .menu-dropdown {
+    position: relative;
+}
+
+.dropdown-toggle {
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Le sous-menu */
+.submenu {
+    flex-direction: column;
+    gap: 4px;
+    padding-left: 15px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+    border-left: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.submenu-item {
+    color: rgba(255, 255, 255, 0.85);
+    padding: 8px 12px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 400;
+    transition: background 0.2s, color 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.submenu-item:hover, .submenu-item.active {
+    background-color: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
+}
     </style>
 </head>
 <body>
@@ -468,7 +508,21 @@ try {
                 <a href="gestion_sections.php" class="menu-item">🏢 Sections</a>
                 <a href="gestion_specialites.php" class="menu-item">📚 Spécialités & Départements</a>
                 <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
-                                <a href="gestion_annonces_notes.php" class="menu-item">📢 Notes, Absences & Annonces</a>            </div>
+                <div class="menu-dropdown">
+                    <!-- Le lien principal qui déclenche l'affichage au clic -->
+                    <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
+                        <span>📢 Notes, Absences & Annonces</span> 
+                        <span id="arrow" style="font-size: 11px;">▾</span>
+                    </a>
+                    
+                    <!-- Le sous-menu masqué par défaut grâce à l'attribut style="display: none;" -->
+                    <div class="submenu" id="submenuNotes" style="display: none;">
+                        <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
+                        <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
+                        <a href="gestion_annonces.php" class="submenu-item">📢 Annonces</a>
+                    </div>
+                </div> 
+            </div>
         </div>
     </div>
 
@@ -526,7 +580,7 @@ try {
                         </div>
                         <div class="form-group">
                             <label for="email">Adresse Email</label>
-                            <input type="email" id="email" name="email" required placeholder="prof@usthb.dz">
+                            <input type="email" id="email" name="email"  placeholder="prof@usthb.dz">
                         </div>
                         <div class="form-group">
                             <label for="password">Mot de passe temporaire</label>
@@ -534,7 +588,7 @@ try {
                         </div>
                         <div class="form-group">
                             <label for="grade">Grade / Titre</label>
-                            <input type="text" id="grade" name="grade" required placeholder="Ex: Professeur, MCA, MAB">
+                            <input type="text" id="grade" name="grade"  placeholder="Ex: Professeur, MCA, MAB">
                         </div>
                         <div class="form-group">
                             <label for="id_departement">Département de rattachement (Optionnel)</label>
@@ -619,6 +673,19 @@ try {
                 dropdown.classList.remove('active');
             }
         }
+
+        function toggleSubmenu() {
+    var submenu = document.getElementById('submenuNotes');
+    var arrow = document.getElementById('arrow');
+    
+    if (submenu.style.display === 'none' || submenu.style.display === '') {
+        submenu.style.display = 'flex'; // Affiche le sous-menu
+        arrow.textContent = '▴';       // Change la flèche vers le haut
+    } else {
+        submenu.style.display = 'none'; // Masque le sous-menu
+        arrow.textContent = '▾';       // Change la flèche vers le bas
+    }
+}
     </script>
 
 </body>

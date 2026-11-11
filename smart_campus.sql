@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Nov 11, 2026 at 05:00 PM
+-- Generation Time: Nov 11, 2026 at 06:42 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.0.30
 
@@ -270,6 +270,23 @@ CREATE TABLE `ressource` (
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `resultat_etudiant`
+--
+
+CREATE TABLE `resultat_etudiant` (
+  `id_resultat` int(11) NOT NULL,
+  `id_user` varchar(100) NOT NULL,
+  `moyenne_s1` decimal(4,2) DEFAULT NULL,
+  `moyenne_s2` decimal(4,2) DEFAULT NULL,
+  `rattrapage_s1` decimal(4,2) DEFAULT NULL,
+  `rattrapage_s2` decimal(4,2) DEFAULT NULL,
+  `moyenne_finale` decimal(4,2) DEFAULT NULL,
+  `decision` varchar(50) DEFAULT 'En cours'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `salle`
 --
 
@@ -310,7 +327,7 @@ CREATE TABLE `scolarite` (
 
 INSERT INTO `scolarite` (`id_sco`, `id_user`, `post_Admin`) VALUES
 (1, 'adminPrincipal1', 'principal'),
-(2, 'agent1mohamed', 'agent');
+(3, 'agent2', 'agent');
 
 -- --------------------------------------------------------
 
@@ -404,7 +421,7 @@ CREATE TABLE `user` (
 INSERT INTO `user` (`id_user`, `nom`, `prenom`, `email`, `mdP`, `role`) VALUES
 ('232331674210', 'Babour', 'Yasmina', 'yasminababour0@gmail.com', '$2y$10$wQyruHfMNdsSIG0zTKzHeuIja.zHZ2ere2DFDD2nVo75XSv5YcJVO', 'etudiant'),
 ('adminPrincipal1', 'Admin', 'Principal', 'adminprincipal1@gmail.com', '$2y$10$MVxcSR9FDiWG5/YiWdaMCuHctrZTWweBuMxk8maKRMkOeERlSwUWS', 'scolarite'),
-('agent1mohamed', 'salmi', 'mohamed', 'salmimohamed@gmail.com', '$2y$10$oDF3hRCl6jHE7GUNxRtMFOrWmpb33.H/CWaMMlI0.N0WAVzLRrGeq', 'scolarite'),
+('agent2', 'mohamed', 'mohamed', 'agent2@gmail.com', '$2y$10$ecPEDl05u5.uhKfAKhF7D.Gpq0Ezbm3m/N/RXvnfVO65hz/9CtAZW', 'scolarite'),
 ('prof1', 'PROFESSEUR', 'prof', 'prof1@gmail.com', '$2y$10$lgJW25EabGJwtkwSfapsB.hoDjYqQLjqV6lzm48ApjvTjUwlGxvJC', 'prof');
 
 --
@@ -519,6 +536,13 @@ ALTER TABLE `ressource`
   ADD KEY `id_prof` (`id_prof`),
   ADD KEY `id_sect` (`id_sect`),
   ADD KEY `id_module` (`id_module`);
+
+--
+-- Indexes for table `resultat_etudiant`
+--
+ALTER TABLE `resultat_etudiant`
+  ADD PRIMARY KEY (`id_resultat`),
+  ADD KEY `fk_resultat_etudiant` (`id_user`);
 
 --
 -- Indexes for table `salle`
@@ -637,6 +661,12 @@ ALTER TABLE `ressource`
   MODIFY `id_R` int(11) NOT NULL AUTO_INCREMENT;
 
 --
+-- AUTO_INCREMENT for table `resultat_etudiant`
+--
+ALTER TABLE `resultat_etudiant`
+  MODIFY `id_resultat` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT for table `salle`
 --
 ALTER TABLE `salle`
@@ -646,7 +676,7 @@ ALTER TABLE `salle`
 -- AUTO_INCREMENT for table `scolarite`
 --
 ALTER TABLE `scolarite`
-  MODIFY `id_sco` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+  MODIFY `id_sco` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
 
 --
 -- AUTO_INCREMENT for table `seance`
@@ -699,6 +729,12 @@ ALTER TABLE `exam`
 ALTER TABLE `programme`
   ADD CONSTRAINT `module_ibfk_1` FOREIGN KEY (`id_mod`) REFERENCES `module` (`id_mod`),
   ADD CONSTRAINT `prog_ibfk_1` FOREIGN KEY (`id_sp`) REFERENCES `specialite` (`id_sp`);
+
+--
+-- Constraints for table `resultat_etudiant`
+--
+ALTER TABLE `resultat_etudiant`
+  ADD CONSTRAINT `fk_resultat_etudiant` FOREIGN KEY (`id_user`) REFERENCES `etudiant` (`id_user`) ON DELETE CASCADE ON UPDATE CASCADE;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

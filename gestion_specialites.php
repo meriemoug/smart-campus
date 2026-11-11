@@ -220,6 +220,47 @@ try {
         .dropdown-item:hover { background-color: var(--bg); }
         .dropdown-item.logout { background-color: var(--error); color: var(--on-error); text-align: center; }
         .dropdown-item.logout:hover { opacity: 0.9; }
+
+
+        .menu-dropdown {
+    position: relative;
+}
+
+.dropdown-toggle {
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Le sous-menu */
+.submenu {
+    flex-direction: column;
+    gap: 4px;
+    padding-left: 15px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+    border-left: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.submenu-item {
+    color: rgba(255, 255, 255, 0.85);
+    padding: 8px 12px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 400;
+    transition: background 0.2s, color 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.submenu-item:hover, .submenu-item.active {
+    background-color: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
+}
     </style>
 </head>
 <body>
@@ -236,7 +277,21 @@ try {
                 <a href="gestion_sections.php" class="menu-item">🏢 Sections</a>
                 <a href="gestion_specialites.php" class="menu-item active">📚 Spécialités & Départements</a>
                 <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
-                                <a href="gestion_annonces_notes.php" class="menu-item">📢 Notes, Absences & Annonces</a>            </div>
+                <div class="menu-dropdown">
+                    <!-- Le lien principal qui déclenche l'affichage au clic -->
+                    <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
+                        <span>📢 Notes, Absences & Annonces</span> 
+                        <span id="arrow" style="font-size: 11px;">▾</span>
+                    </a>
+                    
+                    <!-- Le sous-menu masqué par défaut grâce à l'attribut style="display: none;" -->
+                    <div class="submenu" id="submenuNotes" style="display: none;">
+                        <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
+                        <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
+                        <a href="gestion_annonces.php" class="submenu-item">📢 Annonces</a>
+                    </div>
+                </div> 
+             </div>
         </div>
     </div>
 
@@ -449,6 +504,20 @@ try {
                 dropdown.classList.remove('active');
             }
         }
+
+
+        function toggleSubmenu() {
+    var submenu = document.getElementById('submenuNotes');
+    var arrow = document.getElementById('arrow');
+    
+    if (submenu.style.display === 'none' || submenu.style.display === '') {
+        submenu.style.display = 'flex'; // Affiche le sous-menu
+        arrow.textContent = '▴';       // Change la flèche vers le haut
+    } else {
+        submenu.style.display = 'none'; // Masque le sous-menu
+        arrow.textContent = '▾';       // Change la flèche vers le bas
+    }
+}
     </script>
 
 </body>
