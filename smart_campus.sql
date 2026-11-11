@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Nov 06, 2026 at 07:10 PM
+-- Generation Time: Nov 11, 2026 at 05:00 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.0.30
 
@@ -18,7 +18,7 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 --
--- Database: `smart_compus`
+-- Database: `smart_campus`
 --
 
 -- --------------------------------------------------------
@@ -48,6 +48,13 @@ CREATE TABLE `departement` (
   `Nom_Dep` varchar(100) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+--
+-- Dumping data for table `departement`
+--
+
+INSERT INTO `departement` (`id_Dep`, `Nom_Dep`) VALUES
+(4, 'IA');
+
 -- --------------------------------------------------------
 
 --
@@ -58,6 +65,13 @@ CREATE TABLE `enseignement` (
   `id_prof` int(11) NOT NULL,
   `id_mod` int(11) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `enseignement`
+--
+
+INSERT INTO `enseignement` (`id_prof`, `id_mod`) VALUES
+(2, 1);
 
 -- --------------------------------------------------------
 
@@ -70,9 +84,16 @@ CREATE TABLE `etudiant` (
   `id_user` varchar(100) NOT NULL,
   `id_sp` int(11) DEFAULT NULL,
   `id_Sec` int(11) DEFAULT NULL,
-  `id_groupe` int(11) DEFAULT NULL,
+  `groupe` int(11) NOT NULL DEFAULT 1,
   `annee` tinyint(4) DEFAULT NULL
-) ;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `etudiant`
+--
+
+INSERT INTO `etudiant` (`id_Etu`, `id_user`, `id_sp`, `id_Sec`, `groupe`, `annee`) VALUES
+(2, '232331674210', 6, 1, 2, 2);
 
 -- --------------------------------------------------------
 
@@ -90,7 +111,14 @@ CREATE TABLE `exam` (
   `dateEx` date NOT NULL,
   `heurD` time DEFAULT NULL,
   `heurF` time DEFAULT NULL
-) ;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `exam`
+--
+
+INSERT INTO `exam` (`id_exam`, `id_mod`, `id_sec`, `id_prof`, `id_salle`, `type_exam`, `dateEx`, `heurD`, `heurF`) VALUES
+(1, 1, 1, 2, 1, 'normal', '2026-12-29', '11:20:00', '12:50:00');
 
 -- --------------------------------------------------------
 
@@ -141,11 +169,15 @@ CREATE TABLE `liste_appel` (
 
 CREATE TABLE `module` (
   `id_mod` int(11) NOT NULL,
-  `Nom_mod` varchar(100) NOT NULL,
-  `id_sp` int(11) DEFAULT NULL,
-  `semestre` tinyint(4) NOT NULL DEFAULT 1,
-  `coefficient` decimal(3,1) NOT NULL DEFAULT 1.0
-) ;
+  `Nom_mod` varchar(100) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `module`
+--
+
+INSERT INTO `module` (`id_mod`, `Nom_mod`) VALUES
+(1, 'compil1');
 
 -- --------------------------------------------------------
 
@@ -160,7 +192,7 @@ CREATE TABLE `note` (
   `Exam` float DEFAULT NULL,
   `TD` float DEFAULT NULL,
   `TP` float DEFAULT NULL
-) ;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
@@ -187,8 +219,36 @@ CREATE TABLE `prof` (
   `id_prof` int(11) NOT NULL,
   `id_user` varchar(100) NOT NULL,
   `id_Dep` int(11) DEFAULT NULL,
-  `bureau` varchar(50) DEFAULT NULL
+  `grade` varchar(50) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `prof`
+--
+
+INSERT INTO `prof` (`id_prof`, `id_user`, `id_Dep`, `grade`) VALUES
+(2, 'prof1', NULL, 'professeur');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `programme`
+--
+
+CREATE TABLE `programme` (
+  `id_prog` int(11) NOT NULL,
+  `id_sp` int(11) NOT NULL,
+  `id_mod` int(11) NOT NULL,
+  `semestre` tinyint(4) NOT NULL DEFAULT 1,
+  `coefficient` decimal(3,1) NOT NULL DEFAULT 1.0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `programme`
+--
+
+INSERT INTO `programme` (`id_prog`, `id_sp`, `id_mod`, `semestre`, `coefficient`) VALUES
+(1, 6, 1, 1, 4.0);
 
 -- --------------------------------------------------------
 
@@ -217,8 +277,20 @@ CREATE TABLE `salle` (
   `id_salle` int(11) NOT NULL,
   `nom_salle` varchar(50) NOT NULL,
   `capacite` int(11) DEFAULT NULL,
-  `typeSalle` enum('amphi','salle_cours','salle_TD','labo','salle_info') NOT NULL DEFAULT 'salle_cours'
-) ;
+  `typeSalle` varchar(15) NOT NULL DEFAULT 'salle_cours'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `salle`
+--
+
+INSERT INTO `salle` (`id_salle`, `nom_salle`, `capacite`, `typeSalle`) VALUES
+(1, 'Amphi A', 300, 'cours'),
+(2, 'Amphi B', 250, 'cours'),
+(3, 'Salle 101', 45, 'TD'),
+(4, 'Salle 103', 45, 'TD'),
+(5, 'TP1', 30, 'TP'),
+(6, 'TP2', 30, 'TP');
 
 -- --------------------------------------------------------
 
@@ -232,6 +304,14 @@ CREATE TABLE `scolarite` (
   `post_Admin` varchar(100) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+--
+-- Dumping data for table `scolarite`
+--
+
+INSERT INTO `scolarite` (`id_sco`, `id_user`, `post_Admin`) VALUES
+(1, 'adminPrincipal1', 'principal'),
+(2, 'agent1mohamed', 'agent');
+
 -- --------------------------------------------------------
 
 --
@@ -242,14 +322,23 @@ CREATE TABLE `seance` (
   `id_Seance` int(11) NOT NULL,
   `id_salle` int(11) NOT NULL,
   `id_prof` int(11) NOT NULL,
-  `id_section` int(11) NOT NULL,
+  `id_Sec` int(11) NOT NULL,
   `id_groupe` int(11) DEFAULT NULL,
   `id_mod` int(11) NOT NULL,
   `type_seance` enum('cours','TD','TP') NOT NULL DEFAULT 'cours',
   `jour` enum('Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi') NOT NULL,
   `heurD` time NOT NULL,
   `heurF` time NOT NULL
-) ;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `seance`
+--
+
+INSERT INTO `seance` (`id_Seance`, `id_salle`, `id_prof`, `id_Sec`, `id_groupe`, `id_mod`, `type_seance`, `jour`, `heurD`, `heurF`) VALUES
+(1, 1, 2, 1, NULL, 1, 'cours', 'Samedi', '08:00:00', '09:30:00'),
+(3, 3, 2, 1, 1, 1, 'TD', 'Dimanche', '08:00:00', '09:30:00'),
+(4, 5, 2, 1, 2, 1, 'TP', 'Lundi', '08:00:00', '09:30:00');
 
 -- --------------------------------------------------------
 
@@ -260,8 +349,17 @@ CREATE TABLE `seance` (
 CREATE TABLE `section` (
   `id_Sec` int(11) NOT NULL,
   `nom_sec` varchar(100) NOT NULL,
-  `id_sp` int(11) DEFAULT NULL
+  `id_sp` int(11) DEFAULT NULL,
+  `nombre_groupes` int(11) DEFAULT 4
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `section`
+--
+
+INSERT INTO `section` (`id_Sec`, `nom_sec`, `id_sp`, `nombre_groupes`) VALUES
+(1, 'A', 6, 4),
+(2, 'A', 7, 4);
 
 -- --------------------------------------------------------
 
@@ -272,8 +370,17 @@ CREATE TABLE `section` (
 CREATE TABLE `specialite` (
   `id_sp` int(11) NOT NULL,
   `NomSp` varchar(100) NOT NULL,
-  `id_Dep` int(11) DEFAULT NULL
+  `id_Dep` int(11) DEFAULT NULL,
+  `annee` int(11) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `specialite`
+--
+
+INSERT INTO `specialite` (`id_sp`, `NomSp`, `id_Dep`, `annee`) VALUES
+(6, 'Machine Learning', 4, 2),
+(7, 'Deep Learning', 4, 3);
 
 -- --------------------------------------------------------
 
@@ -295,7 +402,10 @@ CREATE TABLE `user` (
 --
 
 INSERT INTO `user` (`id_user`, `nom`, `prenom`, `email`, `mdP`, `role`) VALUES
-('adminPrincipal1', 'Admin', 'Principal', 'adminprincipal1@gmail.com', 'adminprincipal', 'scolarite');
+('232331674210', 'Babour', 'Yasmina', 'yasminababour0@gmail.com', '$2y$10$wQyruHfMNdsSIG0zTKzHeuIja.zHZ2ere2DFDD2nVo75XSv5YcJVO', 'etudiant'),
+('adminPrincipal1', 'Admin', 'Principal', 'adminprincipal1@gmail.com', '$2y$10$MVxcSR9FDiWG5/YiWdaMCuHctrZTWweBuMxk8maKRMkOeERlSwUWS', 'scolarite'),
+('agent1mohamed', 'salmi', 'mohamed', 'salmimohamed@gmail.com', '$2y$10$oDF3hRCl6jHE7GUNxRtMFOrWmpb33.H/CWaMMlI0.N0WAVzLRrGeq', 'scolarite'),
+('prof1', 'PROFESSEUR', 'prof', 'prof1@gmail.com', '$2y$10$lgJW25EabGJwtkwSfapsB.hoDjYqQLjqV6lzm48ApjvTjUwlGxvJC', 'prof');
 
 --
 -- Indexes for dumped tables
@@ -330,7 +440,7 @@ ALTER TABLE `etudiant`
   ADD UNIQUE KEY `uq_etudiant_user` (`id_user`),
   ADD KEY `id_sp` (`id_sp`),
   ADD KEY `id_Sec` (`id_Sec`),
-  ADD KEY `id_groupe` (`id_groupe`);
+  ADD KEY `id_groupe` (`groupe`);
 
 --
 -- Indexes for table `exam`
@@ -368,8 +478,7 @@ ALTER TABLE `liste_appel`
 -- Indexes for table `module`
 --
 ALTER TABLE `module`
-  ADD PRIMARY KEY (`id_mod`),
-  ADD KEY `id_sp` (`id_sp`);
+  ADD PRIMARY KEY (`id_mod`);
 
 --
 -- Indexes for table `note`
@@ -393,6 +502,14 @@ ALTER TABLE `prof`
   ADD PRIMARY KEY (`id_prof`),
   ADD UNIQUE KEY `uq_prof_user` (`id_user`),
   ADD KEY `id_Dep` (`id_Dep`);
+
+--
+-- Indexes for table `programme`
+--
+ALTER TABLE `programme`
+  ADD PRIMARY KEY (`id_prog`),
+  ADD KEY `prog_ibfk_1` (`id_sp`),
+  ADD KEY `module_ibfk_1` (`id_mod`);
 
 --
 -- Indexes for table `ressource`
@@ -424,7 +541,7 @@ ALTER TABLE `seance`
   ADD PRIMARY KEY (`id_Seance`),
   ADD KEY `id_salle` (`id_salle`),
   ADD KEY `id_prof` (`id_prof`),
-  ADD KEY `id_section` (`id_section`),
+  ADD KEY `id_section` (`id_Sec`),
   ADD KEY `id_groupe` (`id_groupe`),
   ADD KEY `id_mod` (`id_mod`);
 
@@ -463,19 +580,19 @@ ALTER TABLE `annonce`
 -- AUTO_INCREMENT for table `departement`
 --
 ALTER TABLE `departement`
-  MODIFY `id_Dep` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_Dep` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
 
 --
 -- AUTO_INCREMENT for table `etudiant`
 --
 ALTER TABLE `etudiant`
-  MODIFY `id_Etu` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_Etu` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
 -- AUTO_INCREMENT for table `exam`
 --
 ALTER TABLE `exam`
-  MODIFY `id_exam` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_exam` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- AUTO_INCREMENT for table `groupe`
@@ -493,7 +610,7 @@ ALTER TABLE `liste_appel`
 -- AUTO_INCREMENT for table `module`
 --
 ALTER TABLE `module`
-  MODIFY `id_mod` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_mod` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- AUTO_INCREMENT for table `notification`
@@ -505,7 +622,13 @@ ALTER TABLE `notification`
 -- AUTO_INCREMENT for table `prof`
 --
 ALTER TABLE `prof`
-  MODIFY `id_prof` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_prof` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+
+--
+-- AUTO_INCREMENT for table `programme`
+--
+ALTER TABLE `programme`
+  MODIFY `id_prog` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- AUTO_INCREMENT for table `ressource`
@@ -517,31 +640,31 @@ ALTER TABLE `ressource`
 -- AUTO_INCREMENT for table `salle`
 --
 ALTER TABLE `salle`
-  MODIFY `id_salle` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_salle` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
 
 --
 -- AUTO_INCREMENT for table `scolarite`
 --
 ALTER TABLE `scolarite`
-  MODIFY `id_sco` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_sco` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
 -- AUTO_INCREMENT for table `seance`
 --
 ALTER TABLE `seance`
-  MODIFY `id_Seance` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_Seance` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
 
 --
 -- AUTO_INCREMENT for table `section`
 --
 ALTER TABLE `section`
-  MODIFY `id_Sec` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_Sec` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
 -- AUTO_INCREMENT for table `specialite`
 --
 ALTER TABLE `specialite`
-  MODIFY `id_sp` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_sp` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=8;
 
 --
 -- Constraints for dumped tables
@@ -562,15 +685,6 @@ ALTER TABLE `enseignement`
   ADD CONSTRAINT `enseignement_ibfk_2` FOREIGN KEY (`id_mod`) REFERENCES `module` (`id_mod`) ON DELETE CASCADE;
 
 --
--- Constraints for table `etudiant`
---
-ALTER TABLE `etudiant`
-  ADD CONSTRAINT `etudiant_ibfk_1` FOREIGN KEY (`id_user`) REFERENCES `user` (`id_user`) ON DELETE CASCADE,
-  ADD CONSTRAINT `etudiant_ibfk_2` FOREIGN KEY (`id_sp`) REFERENCES `specialite` (`id_sp`),
-  ADD CONSTRAINT `etudiant_ibfk_3` FOREIGN KEY (`id_Sec`) REFERENCES `section` (`id_Sec`),
-  ADD CONSTRAINT `etudiant_ibfk_4` FOREIGN KEY (`id_groupe`) REFERENCES `groupe` (`id_groupe`) ON DELETE SET NULL;
-
---
 -- Constraints for table `exam`
 --
 ALTER TABLE `exam`
@@ -580,87 +694,11 @@ ALTER TABLE `exam`
   ADD CONSTRAINT `exam_ibfk_4` FOREIGN KEY (`id_salle`) REFERENCES `salle` (`id_salle`);
 
 --
--- Constraints for table `groupe`
+-- Constraints for table `programme`
 --
-ALTER TABLE `groupe`
-  ADD CONSTRAINT `groupe_ibfk_1` FOREIGN KEY (`id_Sec`) REFERENCES `section` (`id_Sec`) ON DELETE CASCADE;
-
---
--- Constraints for table `ligne_appel`
---
-ALTER TABLE `ligne_appel`
-  ADD CONSTRAINT `ligne_appel_ibfk_1` FOREIGN KEY (`id_liste`) REFERENCES `liste_appel` (`id_liste`) ON DELETE CASCADE,
-  ADD CONSTRAINT `ligne_appel_ibfk_2` FOREIGN KEY (`id_Etu`) REFERENCES `etudiant` (`id_Etu`) ON DELETE CASCADE;
-
---
--- Constraints for table `liste_appel`
---
-ALTER TABLE `liste_appel`
-  ADD CONSTRAINT `liste_appel_ibfk_1` FOREIGN KEY (`id_Seance`) REFERENCES `seance` (`id_Seance`) ON DELETE CASCADE,
-  ADD CONSTRAINT `liste_appel_ibfk_2` FOREIGN KEY (`id_prof`) REFERENCES `prof` (`id_prof`);
-
---
--- Constraints for table `module`
---
-ALTER TABLE `module`
-  ADD CONSTRAINT `module_ibfk_1` FOREIGN KEY (`id_sp`) REFERENCES `specialite` (`id_sp`) ON DELETE CASCADE;
-
---
--- Constraints for table `note`
---
-ALTER TABLE `note`
-  ADD CONSTRAINT `note_ibfk_1` FOREIGN KEY (`id_Etud`) REFERENCES `etudiant` (`id_Etu`) ON DELETE CASCADE,
-  ADD CONSTRAINT `note_ibfk_2` FOREIGN KEY (`id_Mod`) REFERENCES `module` (`id_mod`) ON DELETE CASCADE,
-  ADD CONSTRAINT `note_ibfk_3` FOREIGN KEY (`id_prof`) REFERENCES `prof` (`id_prof`);
-
---
--- Constraints for table `notification`
---
-ALTER TABLE `notification`
-  ADD CONSTRAINT `notification_ibfk_1` FOREIGN KEY (`id_user`) REFERENCES `user` (`id_user`) ON DELETE CASCADE;
-
---
--- Constraints for table `prof`
---
-ALTER TABLE `prof`
-  ADD CONSTRAINT `prof_ibfk_1` FOREIGN KEY (`id_user`) REFERENCES `user` (`id_user`) ON DELETE CASCADE,
-  ADD CONSTRAINT `prof_ibfk_2` FOREIGN KEY (`id_Dep`) REFERENCES `departement` (`id_Dep`) ON DELETE SET NULL;
-
---
--- Constraints for table `ressource`
---
-ALTER TABLE `ressource`
-  ADD CONSTRAINT `ressource_ibfk_1` FOREIGN KEY (`id_prof`) REFERENCES `prof` (`id_prof`),
-  ADD CONSTRAINT `ressource_ibfk_2` FOREIGN KEY (`id_sect`) REFERENCES `section` (`id_Sec`),
-  ADD CONSTRAINT `ressource_ibfk_3` FOREIGN KEY (`id_module`) REFERENCES `module` (`id_mod`);
-
---
--- Constraints for table `scolarite`
---
-ALTER TABLE `scolarite`
-  ADD CONSTRAINT `scolarite_ibfk_1` FOREIGN KEY (`id_user`) REFERENCES `user` (`id_user`) ON DELETE CASCADE;
-
---
--- Constraints for table `seance`
---
-ALTER TABLE `seance`
-  ADD CONSTRAINT `seance_ibfk_1` FOREIGN KEY (`id_salle`) REFERENCES `salle` (`id_salle`),
-  ADD CONSTRAINT `seance_ibfk_2` FOREIGN KEY (`id_prof`) REFERENCES `prof` (`id_prof`),
-  ADD CONSTRAINT `seance_ibfk_3` FOREIGN KEY (`id_section`) REFERENCES `section` (`id_Sec`),
-  ADD CONSTRAINT `seance_ibfk_4` FOREIGN KEY (`id_mod`) REFERENCES `module` (`id_mod`),
-  ADD CONSTRAINT `seance_ibfk_5` FOREIGN KEY (`id_groupe`) REFERENCES `groupe` (`id_groupe`);
-
---
--- Constraints for table `section`
---
-ALTER TABLE `section`
-  ADD CONSTRAINT `section_ibfk_1` FOREIGN KEY (`id_sp`) REFERENCES `specialite` (`id_sp`) ON DELETE CASCADE;
-
---
--- Constraints for table `specialite`
---
-ALTER TABLE `specialite`
-  ADD CONSTRAINT `specialite_ibfk_1` FOREIGN KEY (`id_Dep`) REFERENCES `departement` (`id_Dep`) ON DELETE CASCADE;
+ALTER TABLE `programme`
+  ADD CONSTRAINT `module_ibfk_1` FOREIGN KEY (`id_mod`) REFERENCES `module` (`id_mod`),
+  ADD CONSTRAINT `prog_ibfk_1` FOREIGN KEY (`id_sp`) REFERENCES `specialite` (`id_sp`);
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

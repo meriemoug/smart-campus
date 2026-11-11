@@ -423,6 +423,33 @@ try {
             margin-bottom: 20px;
             border: 1px solid #f5c6cb;
         }
+
+        /* Style du profil utilisateur cliquable */
+        .user-menu-container { position: relative; display: inline-block; cursor: pointer; }
+        .user-profile { display: flex; align-items: center; gap: 12px; }
+        .user-avatar { width: 38px; height: 38px; background-color: var(--accent); color: var(--on-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        
+        /* Dropdown du profil */
+        .user-dropdown {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 50px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            width: 240px;
+            z-index: 1000;
+            padding: 15px;
+            color: var(--text);
+        }
+        .user-dropdown.active { display: block; }
+        .dropdown-header { font-weight: bold; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+        .dropdown-item { display: block; width: 100%; padding: 8px 10px; text-align: left; background: none; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; color: var(--text); margin-bottom: 5px; }
+        .dropdown-item:hover { background-color: var(--bg); }
+        .dropdown-item.logout { background-color: var(--error); color: var(--on-error); text-align: center; }
+        .dropdown-item.logout:hover { opacity: 0.9; }
     </style>
 </head>
 <body>
@@ -440,19 +467,31 @@ try {
                 <a href="gestion_sections.php" class="menu-item">🏢 Sections</a>
                 <a href="gestion_specialites.php" class="menu-item">📚 Spécialités & Départements</a>
                 <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
-                <a href="gestion_annonces_notes.php" class="menu-item">📢 Annonces & Notes</a>
-            </div>
+                <a href="gestion_annonces_notes.php" class="menu-item">📢 Notes, Absences & Annonces</a>            </div>
         </div>
-        <a href="logout.php" class="btn-logout">Se déconnecter</a>
     </div>
 
     <!-- Main Content -->
     <div class="main-content">
         <div class="top-navbar">
-            <h2>Espace Administrateur Principal</h2>
-            <div class="user-profile">
-                <span>Admin : <strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
-                <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
+            <h2>Espace Scolarité - Gestion des Sections</h2>
+            
+            <!-- Profil utilisateur cliquable avec menu déroulant -->
+            <div class="user-menu-container" onclick="toggleUserMenu(event)">
+                <div class="user-profile">
+                    <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
+                    <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
+                </div>
+
+                <!-- Dropdown affiché au clic -->
+                <div id="userDropdown" class="user-dropdown">
+                    <div class="dropdown-header">
+                        Connecté en tant que<br>
+                        <span style="color: var(--menu);"><?php echo htmlspecialchars($_SESSION['email'] ?? 'Scolarité'); ?></span>
+                    </div>
+                    <a href="modifier_infos.php" class="dropdown-item">✏️ Modifier mes informations</a>
+                    <a href="logout.php" class="dropdown-item logout">Se déconnecter</a>
+                </div>
             </div>
         </div>
 
@@ -552,6 +591,22 @@ try {
             </div>
         </div>
     </div>
+    <script>
+        // Gestion du menu déroulant de l'avatar utilisateur
+        function toggleUserMenu(event) {
+            event.stopPropagation();
+            var dropdown = document.getElementById('userDropdown');
+            dropdown.classList.toggle('active');
+        }
+
+        // Fermer le menu si on clique ailleurs sur la page
+        window.onclick = function(event) {
+            var dropdown = document.getElementById('userDropdown');
+            if (dropdown && dropdown.classList.contains('active')) {
+                dropdown.classList.remove('active');
+            }
+        }
+    </script>
 
 </body>
 </html>
