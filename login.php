@@ -31,6 +31,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['nom']     = $user_data['nom'];
                 $_SESSION['prenom']  = $user_data['prenom'];
                 $_SESSION['role']    = $user_data['role'];
+                $_SESSION['email']   = $user_data['email'];
+                
 
                 // 3. Redirection dynamique selon le Rôle
                 switch ($user_data['role']) {
