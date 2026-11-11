@@ -31,7 +31,7 @@ try {
 
         if (!empty($id_etudiant) && !empty($nom) && !empty($prenom) && !empty($email) && !empty($password) && !empty($id_section) && !empty($id_spec) && !empty($groupe)) {
             
-            $stmt_sec_check = $pdo->prepare("SELECT nombre_groupes FROM section WHERE c = ?");
+            $stmt_sec_check = $pdo->prepare("SELECT nombre_groupes FROM section WHERE id_Sec = ?");
             $stmt_sec_check->execute([$id_section]);
             $section_data = $stmt_sec_check->fetch(PDO::FETCH_ASSOC);
 
