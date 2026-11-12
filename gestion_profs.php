@@ -529,7 +529,7 @@ try {
     <!-- Main Content -->
     <div class="main-content">
         <div class="top-navbar">
-            <h2>Espace Scolarité - Gestion des Sections</h2>
+            <h2>Espace Scolarité - Gestion des Profs</h2>
             
             <!-- Profil utilisateur cliquable avec menu déroulant -->
             <div class="user-menu-container" onclick="toggleUserMenu(event)">

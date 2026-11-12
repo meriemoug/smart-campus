@@ -40,6 +40,26 @@ try {
         }
     }
 
+    // SUPPRESSION D'UNE SECTION
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_section'])) {
+        $id_Sec_del = intval($_POST['id_Sec_to_delete'] ?? 0);
+        if ($id_Sec_del > 0) {
+            // Optionnel : supprimer d'abord les séances liées pour éviter les erreurs de clé étrangère
+            $pdo->prepare("DELETE FROM seance WHERE id_Sec = ?")->execute([$id_Sec_del]);
+            
+            // Supprimer la section
+            $stmt_del_sec = $pdo->prepare("DELETE FROM section WHERE id_Sec = ?");
+            $stmt_del_sec->execute([$id_Sec_del]);
+            
+            $message = "La section a été supprimée avec succès.";
+            // Si la section supprimée était celle actuellement sélectionnée, on réinitialise la sélection
+            if (isset($_GET['id_sec_selected']) && $_GET['id_sec_selected'] == $id_Sec_del) {
+                $_GET['id_sec_selected'] = null;
+                $id_sec_selected = null;
+            }
+        }
+    }
+
     // 2. Modification du professeur responsable d'un module
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_prof_module'])) {
         $id_mod_target = intval($_POST['id_mod_target'] ?? 0);
@@ -252,7 +272,7 @@ try {
         .btn-submit { background-color: var(--header); color: var(--on-blue); border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; transition: background 0.2s; }
         .btn-submit:hover { background-color: var(--menu); }
         .btn-edit { background-color: var(--menu); color: var(--on-blue); padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 600; text-decoration: none; display: inline-block; }
-        .btn-delete { background-color: var(--error); color: var(--on-error); border: none; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; }
+        .btn-delete { background-color: var(--error); color: var(--on-error); border: none; padding: 6px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; }
 
         table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; }
         th, td { padding: 10px; text-align: left; border-bottom: 1px solid var(--border); }
@@ -308,44 +328,44 @@ try {
         .dropdown-item.logout:hover { opacity: 0.9; }
 
         .menu-dropdown {
-    position: relative;
-}
+            position: relative;
+        }
 
-.dropdown-toggle {
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
+        .dropdown-toggle {
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
 
-/* Le sous-menu */
-.submenu {
-    flex-direction: column;
-    gap: 4px;
-    padding-left: 15px;
-    margin-top: 4px;
-    margin-bottom: 4px;
-    border-left: 2px solid rgba(255, 255, 255, 0.2);
-}
+        /* Le sous-menu */
+        .submenu {
+            flex-direction: column;
+            gap: 4px;
+            padding-left: 15px;
+            margin-top: 4px;
+            margin-bottom: 4px;
+            border-left: 2px solid rgba(255, 255, 255, 0.2);
+        }
 
-.submenu-item {
-    color: rgba(255, 255, 255, 0.85);
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 13px;
-    font-weight: 400;
-    transition: background 0.2s, color 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
+        .submenu-item {
+            color: rgba(255, 255, 255, 0.85);
+            padding: 8px 12px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 400;
+            transition: background 0.2s, color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
 
-.submenu-item:hover, .submenu-item.active {
-    background-color: var(--accent);
-    color: var(--on-accent);
-    font-weight: 600;
-}
+        .submenu-item:hover, .submenu-item.active {
+            background-color: var(--accent);
+            color: var(--on-accent);
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -363,13 +383,11 @@ try {
                 <a href="gestion_specialites.php" class="menu-item">📚 Spécialités & Départements</a>
                 <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
                 <div class="menu-dropdown">
-                    <!-- Le lien principal qui déclenche l'affichage au clic -->
                     <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
                         <span>📢 Notes, Absences & Annonces</span> 
                         <span id="arrow" style="font-size: 11px;">▾</span>
                     </a>
                     
-                    <!-- Le sous-menu masqué par défaut grâce à l'attribut style="display: none;" -->
                     <div class="submenu" id="submenuNotes" style="display: none;">
                         <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
                         <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
@@ -383,16 +401,14 @@ try {
     <!-- Main Content -->
     <div class="main-content">
         <div class="top-navbar">
-            <h2>Espace Scolarité - Gestion des Sections</h2>
+            <h2>Espace Scolarité - Gestion des Section et Emplois du Temps</h2>
             
-            <!-- Profil utilisateur cliquable avec menu déroulant -->
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
                     <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
                     <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
                 </div>
 
-                <!-- Dropdown affiché au clic -->
                 <div id="userDropdown" class="user-dropdown">
                     <div class="dropdown-header">
                         Connecté en tant que<br>
@@ -471,7 +487,7 @@ try {
                                 <th>Spécialité</th>
                                 <th>Année</th>
                                 <th>Nb Groupes</th>
-                                <th>Action</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -482,10 +498,17 @@ try {
                                     <td><?php echo htmlspecialchars($sec['NomSp']); ?></td>
                                     <td>Année <?php echo htmlspecialchars($sec['annee']); ?></td>
                                     <td><?php echo htmlspecialchars($sec['nombre_groupes']); ?> groupe(s)</td>
-                                    <td>
+                                    <td style="display: flex; gap: 8px; align-items: center;">
                                         <a href="gestion_sections.php?id_sec_selected=<?php echo $sec['id_Sec']; ?>&filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" class="btn-edit">
-                                            ⚙️ Gérer l'emploi du temps
+                                            ⚙️ Gérer l'EDT
                                         </a>
+                                        <!-- Formulaire de suppression de section -->
+                                        <form action="gestion_sections.php?filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" method="POST" style="display:inline; margin:0;">
+                                            <input type="hidden" name="id_Sec_to_delete" value="<?php echo $sec['id_Sec']; ?>">
+                                            <button type="submit" name="supprimer_section" class="btn-delete" onclick="return confirm('Attention : La suppression de cette section supprimera également ses séances associées. Voulez-vous continuer ?');">
+                                                🗑️ Supprimer
+                                            </button>
+                                        </form>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -725,32 +748,28 @@ try {
         }
 
         function filtrerSallesEtGroupe() {
-            var typeSeance = document.getElementById('modal_type_seance').value; // 'cours', 'TD', 'TP'
+            var typeSeance = document.getElementById('modal_type_seance').value;
             var salleSelect = document.getElementById('modal_id_salle');
             var options = salleSelect.options;
 
-            // 1. Identifier les IDs des salles occupées sur ce créneau horaire précis (toute l'université)
             var sallesOccupees = [];
             toutesSeances.forEach(function(s) {
                 if (s.jour === currentJour) {
-                    // Vérification du chevauchement d'horaires
                     if (s.heurD < currentHeurF && s.heurF > currentHeurD) {
                         sallesOccupees.push(parseInt(s.id_salle));
                     }
                 }
             });
 
-            // 2. Parcourir et filtrer les options de salles
             for (var i = 0; i < options.length; i++) {
                 var opt = options[i];
-                var optType = opt.getAttribute('data-type'); // 'cours', 'salle_TD', 'labo', etc.
+                var optType = opt.getAttribute('data-type');
                 var optId = parseInt(opt.getAttribute('data-id'));
                 
-                if (!optType) continue; // Ignorer l'option par défaut "-- Sélectionner --"
+                if (!optType) continue;
 
                 var matchType = false;
 
-                // Condition stricte selon le type de séance
                 if (typeSeance === 'cours' && optType === 'cours') {
                     matchType = true;
                 } else if (typeSeance === 'TD' && optType === 'TD') {
@@ -759,18 +778,16 @@ try {
                     matchType = true;
                 }
 
-                // La salle s'affiche UNIQUEMENT si elle correspond au type ET qu'elle n'est PAS occupée
                 if (matchType && !sallesOccupees.includes(optId)) {
                     opt.style.display = 'block';
                     opt.disabled = false;
                 } else {
-                    opt.style.display = 'none'; // Cachée totalement
+                    opt.style.display = 'none';
                     opt.disabled = true;
                 }
             }
-            salleSelect.value = ''; // Réinitialiser la sélection
+            salleSelect.value = '';
 
-            // Gestion de l'affichage du champ groupe pour les TD et TP
             var groupeContainer = document.getElementById('groupe_container');
             var groupeInput = document.getElementById('modal_id_groupe');
             if (typeSeance === 'TD' || typeSeance === 'TP') {
@@ -783,34 +800,31 @@ try {
             }
         }
         
-        // Gestion du menu déroulant de l'avatar utilisateur
         function toggleUserMenu(event) {
             event.stopPropagation();
             var dropdown = document.getElementById('userDropdown');
             dropdown.classList.toggle('active');
         }
 
-        // Fermer le menu si on clique ailleurs sur la page
         window.onclick = function(event) {
             var dropdown = document.getElementById('userDropdown');
             if (dropdown && dropdown.classList.contains('active')) {
                 dropdown.classList.remove('active');
             }
         }
-    
 
         function toggleSubmenu() {
-    var submenu = document.getElementById('submenuNotes');
-    var arrow = document.getElementById('arrow');
-    
-    if (submenu.style.display === 'none' || submenu.style.display === '') {
-        submenu.style.display = 'flex'; // Affiche le sous-menu
-        arrow.textContent = '▴';       // Change la flèche vers le haut
-    } else {
-        submenu.style.display = 'none'; // Masque le sous-menu
-        arrow.textContent = '▾';       // Change la flèche vers le bas
-    }
-}
+            var submenu = document.getElementById('submenuNotes');
+            var arrow = document.getElementById('arrow');
+            
+            if (submenu.style.display === 'none' || submenu.style.display === '') {
+                submenu.style.display = 'flex';
+                arrow.textContent = '▴';
+            } else {
+                submenu.style.display = 'none';
+                arrow.textContent = '▾';
+            }
+        }
     </script>
 </body>
 </html>
