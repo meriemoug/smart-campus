@@ -35,7 +35,6 @@ try {
             $stmt_sec_check->execute([$id_section]);
             $section_data = $stmt_sec_check->fetch(PDO::FETCH_ASSOC);
 
-            // Vérifier l'année de la spécialité choisie
             $stmt_spec_check = $pdo->prepare("SELECT annee FROM specialite WHERE id_sp = ?");
             $stmt_spec_check->execute([$id_spec]);
             $spec_data = $stmt_spec_check->fetch(PDO::FETCH_ASSOC);
@@ -67,7 +66,7 @@ try {
                         $stmt_user->execute([$id_etudiant, $nom, $prenom, $email, $hashed_password]);
 
                         // Insertion dans 'etudiant'
-                        $stmt_etu = $pdo->prepare("INSERT INTO etudiant (id_user, annee, e.id_Sec, groupe, id_sp) VALUES (?, ?, ?, ?, ?)");
+                        $stmt_etu = $pdo->prepare("INSERT INTO etudiant (id_user, annee, id_Sec, groupe, id_sp) VALUES (?, ?, ?, ?, ?)");
                         $stmt_etu->execute([$id_etudiant, $annee_spec, $id_section, $groupe_int, $id_spec]);
 
                         $pdo->commit();
@@ -80,7 +79,71 @@ try {
         }
     }
 
-    // 2. Traitement de la suppression d'un étudiant
+    // 2. Traitement de la modification d'un étudiant existant
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_etudiant'])) {
+        $id_etu_mod = trim($_POST['id_etu_mod'] ?? '');
+        $nom = trim($_POST['nom'] ?? '');
+        $prenom = trim($_POST['prenom'] ?? '');
+        $email = trim($_POST['email'] ?? '');
+        $id_spec = trim($_POST['id_spec'] ?? '');
+        $id_section = trim($_POST['id_section'] ?? '');
+        $groupe = trim($_POST['groupe'] ?? '');
+        $nouveau_mdp = trim($_POST['password'] ?? '');
+
+        if (!empty($id_etu_mod) && !empty($nom) && !empty($prenom) && !empty($email) && !empty($id_spec) && !empty($id_section) && !empty($groupe)) {
+            // Vérifier si l'email appartient à un autre utilisateur
+            $stmt_check_email = $pdo->prepare("SELECT id_user FROM user WHERE email = ? AND id_user != ?");
+            $stmt_check_email->execute([$email, $id_etu_mod]);
+
+            if ($stmt_check_email->rowCount() > 0) {
+                $error = "Cette adresse email est déjà utilisée par un autre compte.";
+            } else {
+                // Vérifier la section et la spécialité
+                $stmt_sec_check = $pdo->prepare("SELECT nombre_groupes FROM section WHERE id_Sec = ?");
+                $stmt_sec_check->execute([$id_section]);
+                $section_data = $stmt_sec_check->fetch(PDO::FETCH_ASSOC);
+
+                $stmt_spec_check = $pdo->prepare("SELECT annee FROM specialite WHERE id_sp = ?");
+                $stmt_spec_check->execute([$id_spec]);
+                $spec_data = $stmt_spec_check->fetch(PDO::FETCH_ASSOC);
+
+                if (!$section_data || !$spec_data) {
+                    $error = "La section ou la spécialité sélectionnée est invalide.";
+                } else {
+                    $max_groupes = intval($section_data['nombre_groupes']);
+                    $annee_spec = intval($spec_data['annee']);
+                    $groupe_int = intval($groupe);
+
+                    if ($groupe_int < 1 || $groupe_int > $max_groupes) {
+                        $error = "Erreur : Le groupe saisi ($groupe) est invalide. Cette section ne contient que $max_groupes groupe(s).";
+                    } else {
+                        $pdo->beginTransaction();
+
+                        // Mise à jour de la table user
+                        if (!empty($nouveau_mdp)) {
+                            $hashed_password = password_hash($nouveau_mdp, PASSWORD_DEFAULT);
+                            $stmt_up_user = $pdo->prepare("UPDATE user SET nom = ?, prenom = ?, email = ?, mdP = ? WHERE id_user = ?");
+                            $stmt_up_user->execute([$nom, $prenom, $email, $hashed_password, $id_etu_mod]);
+                        } else {
+                            $stmt_up_user = $pdo->prepare("UPDATE user SET nom = ?, prenom = ?, email = ? WHERE id_user = ?");
+                            $stmt_up_user->execute([$nom, $prenom, $email, $id_etu_mod]);
+                        }
+
+                        // Mise à jour de la table etudiant
+                        $stmt_up_etu = $pdo->prepare("UPDATE etudiant SET annee = ?, id_Sec = ?, groupe = ?, id_sp = ? WHERE id_user = ?");
+                        $stmt_up_etu->execute([$annee_spec, $id_section, $groupe_int, $id_spec, $id_etu_mod]);
+
+                        $pdo->commit();
+                        $message = "Les informations de l'étudiant ont été mises à jour avec succès !";
+                    }
+                }
+            }
+        } else {
+            $error = "Veuillez remplir tous les champs obligatoires pour la modification.";
+        }
+    }
+
+    // 3. Traitement de la suppression d'un étudiant
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_etudiant'])) {
         $id_etudiant_to_delete = trim($_POST['id_etudiant_to_delete'] ?? '');
 
@@ -96,19 +159,19 @@ try {
         $message = "L'étudiant a été supprimé avec succès.";
     }
 
-    // 3. Récupérer toutes les sections
+    // 4. Récupérer toutes les sections
     $stmt_sections = $pdo->query("SELECT * FROM section ORDER BY nom_sec ASC");
     $sections = $stmt_sections->fetchAll(PDO::FETCH_ASSOC);
 
-    // 4. Récupérer la liste des spécialités
+    // 5. Récupérer la liste des spécialités
     $stmt_specs = $pdo->query("SELECT * FROM specialite ORDER BY NomSp ASC");
     $specialites = $stmt_specs->fetchAll(PDO::FETCH_ASSOC);
 
-    // 5. Gestion de la recherche
+    // 6. Gestion de la recherche
     $search = trim($_GET['search'] ?? '');
 
     if (!empty($search)) {
-        $stmt_etus = $pdo->prepare("SELECT u.id_user, u.nom, u.prenom, u.email, e.annee, e.groupe, sec.nom_sec, sp.NomSp as nom_spec
+        $stmt_etus = $pdo->prepare("SELECT u.id_user, u.nom, u.prenom, u.email, e.annee, e.groupe, e.id_Sec, e.id_sp, sec.nom_sec, sp.NomSp as nom_spec
                                     FROM etudiant e 
                                     JOIN user u ON e.id_user COLLATE utf8mb4_unicode_ci = u.id_user COLLATE utf8mb4_unicode_ci
                                     LEFT JOIN section sec ON e.id_Sec = sec.id_Sec
@@ -117,7 +180,7 @@ try {
                                     ORDER BY u.nom ASC");
         $stmt_etus->execute(["%$search%", "%$search%", "%$search%"]);
     } else {
-        $stmt_etus = $pdo->query("SELECT u.id_user, u.nom, u.prenom, u.email, e.annee, e.groupe, sec.nom_sec, sp.NomSp as nom_spec
+        $stmt_etus = $pdo->query("SELECT u.id_user, u.nom, u.prenom, u.email, e.annee, e.groupe, e.id_Sec, e.id_sp, sec.nom_sec, sp.NomSp as nom_spec
                                     FROM etudiant e 
                                     JOIN user u ON e.id_user COLLATE utf8mb4_unicode_ci = u.id_user COLLATE utf8mb4_unicode_ci
                                     LEFT JOIN section sec ON e.id_Sec = sec.id_Sec
@@ -247,7 +310,6 @@ try {
             font-weight: 700;
         }
 
-        /* Disposition côte à côte (Formulaire à gauche, Liste à droite) */
         .admin-grid {
             display: grid;
             grid-template-columns: 1fr 1.4fr;
@@ -369,16 +431,33 @@ try {
             background-color: var(--menu);
         }
 
+        .btn-edit {
+            background-color: var(--menu);
+            color: var(--on-blue);
+            border: none;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin: 0;
+            margin-top:10px;
+        }
+
         .btn-delete {
             background-color: var(--error);
             color: var(--on-error);
             border: none;
-            padding: 6px 12px;
+            padding: 6px 10px;
             border-radius: 4px;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
             transition: opacity 0.2s;
+            margin: 0;
+            margin-top:10px;
         }
 
         .btn-delete:hover {
@@ -392,9 +471,10 @@ try {
         }
 
         th, td {
-            padding: 10px 8px;
+            padding: 12px 10px;
             text-align: left;
             border-bottom: 1px solid var(--border);
+            vertical-align: middle;
         }
 
         th {
@@ -425,6 +505,10 @@ try {
             border: 1px solid #f5c6cb;
         }
 
+        /* Modal de modification */
+        #modalEdit { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: white; padding: 25px; border-radius: 10px; width: 480px; max-width: 90%; max-height: 90vh; overflow-y: auto; }
+
         .user-menu-container { position: relative; display: inline-block; cursor: pointer; }
         .user-profile { display: flex; align-items: center; gap: 12px; }
         .user-avatar { width: 38px; height: 38px; background-color: var(--accent); color: var(--on-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
@@ -450,45 +534,11 @@ try {
         .dropdown-item.logout { background-color: var(--error); color: var(--on-error); text-align: center; }
         .dropdown-item.logout:hover { opacity: 0.9; }
 
-        .menu-dropdown {
-    position: relative;
-}
-
-.dropdown-toggle {
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-/* Le sous-menu */
-.submenu {
-    flex-direction: column;
-    gap: 4px;
-    padding-left: 15px;
-    margin-top: 4px;
-    margin-bottom: 4px;
-    border-left: 2px solid rgba(255, 255, 255, 0.2);
-}
-
-.submenu-item {
-    color: rgba(255, 255, 255, 0.85);
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 13px;
-    font-weight: 400;
-    transition: background 0.2s, color 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.submenu-item:hover, .submenu-item.active {
-    background-color: var(--accent);
-    color: var(--on-accent);
-    font-weight: 600;
-}
+        .menu-dropdown { position: relative; }
+        .dropdown-toggle { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .submenu { flex-direction: column; gap: 4px; padding-left: 15px; margin-top: 4px; margin-bottom: 4px; border-left: 2px solid rgba(255, 255, 255, 0.2); }
+        .submenu-item { color: rgba(255, 255, 255, 0.85); padding: 8px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 400; transition: background 0.2s, color 0.2s; display: flex; align-items: center; gap: 8px; }
+        .submenu-item:hover, .submenu-item.active { background-color: var(--accent); color: var(--on-accent); font-weight: 600; }
     </style>
 </head>
 <body>
@@ -509,13 +559,10 @@ try {
                 <a href="gestion_specialites.php" class="menu-item">📚 Spécialités & Départements</a>
                 <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
                 <div class="menu-dropdown">
-                    <!-- Le lien principal qui déclenche l'affichage au clic -->
                     <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
                         <span>📢 Notes, Absences & Annonces</span> 
                         <span id="arrow" style="font-size: 11px;">▾</span>
                     </a>
-                    
-                    <!-- Le sous-menu masqué par défaut grâce à l'attribut style="display: none;" -->
                     <div class="submenu" id="submenuNotes" style="display: none;">
                         <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
                         <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
@@ -559,7 +606,6 @@ try {
                 <div class="alert-error"><?php echo htmlspecialchars($error); ?></div>
             <?php endif; ?>
 
-            <!-- GRID CÔTE À CÔTE : Formulaire à gauche, Liste à droite -->
             <div class="admin-grid">
                 
                 <!-- 1. FORMULAIRE D'INSCRIPTION -->
@@ -580,17 +626,16 @@ try {
                         </div>
                         <div class="form-group">
                             <label for="email">Adresse Email</label>
-                            <input type="email" id="email" name="email"  placeholder="etudiant@usthb.dz">
+                            <input type="email" id="email" name="email" required placeholder="etudiant@usthb.dz">
                         </div>
                         <div class="form-group">
                             <label for="password">Mot de passe temporaire</label>
                             <input type="password" id="password" name="password" required placeholder="••••••••">
                         </div>
                         
-                        <!-- Spécialité -->
                         <div class="form-group">
                             <label for="id_spec">Spécialité</label>
-                            <select id="id_spec" name="id_spec" onchange="surChangementSpecialite()" required>
+                            <select id="id_spec" name="id_spec" onchange="surChangementSpecialite('id_spec', 'annee', 'id_section')" required>
                                 <option value="">-- Choisir une spécialité --</option>
                                 <?php foreach ($specialites as $sp): ?>
                                     <option value="<?php echo htmlspecialchars($sp['id_sp']); ?>" data-annee="<?php echo htmlspecialchars($sp['annee']); ?>">
@@ -600,13 +645,11 @@ try {
                             </select>
                         </div>
 
-                        <!-- Année d'étude (Automatique) -->
                         <div class="form-group">
                             <label for="annee">Année d'étude (Automatique)</label>
                             <input type="number" id="annee" name="annee" readonly style="background-color: #eee;" required placeholder="Auto">
                         </div>
 
-                        <!-- Section (Filtrée dynamiquement selon la spécialité) -->
                         <div class="form-group">
                             <label for="id_section">Section</label>
                             <select id="id_section" name="id_section" required disabled>
@@ -619,7 +662,6 @@ try {
                             </select>
                         </div>
 
-                        <!-- Groupe -->
                         <div class="form-group">
                             <label for="groupe">Numéro du groupe</label>
                             <input type="number" id="groupe" name="groupe" min="1" required placeholder="Ex: 1">
@@ -629,7 +671,7 @@ try {
                     </form>
                 </div>
 
-                <!-- 2. LISTE DES ÉTUDIANTS (SANS LA COLONNE EMAIL) -->
+                <!-- 2. LISTE DES ÉTUDIANTS -->
                 <div class="card">
                     <h3>Étudiants inscrits</h3>
 
@@ -653,7 +695,7 @@ try {
                                         <th>Année</th>
                                         <th>Section / Groupe</th>
                                         <th>Spécialité</th>
-                                        <th>Action</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -664,8 +706,20 @@ try {
                                             <td>Année <?php echo htmlspecialchars($etu['annee']); ?></td>
                                             <td><?php echo htmlspecialchars(($etu['nom_sec'] ?? 'Section') . ' - G.' . ($etu['groupe'] ?? 1)); ?></td>
                                             <td><?php echo htmlspecialchars($etu['nom_spec'] ?? 'Non assignée'); ?></td>
-                                            <td>
-                                                <form action="gestion_etudiants.php" method="POST" onsubmit="return confirm('Supprimer cet étudiant ?');" style="display:inline;">
+                                            <td style="display: flex; align-items: center; gap: 5px;">
+                                                <!-- Bouton Modifier -->
+                                                <button type="button" class="btn-edit" onclick="ouvrirModalEdit(
+                                                    '<?php echo htmlspecialchars($etu['id_user']); ?>',
+                                                    '<?php echo addslashes($etu['nom']); ?>',
+                                                    '<?php echo addslashes($etu['prenom']); ?>',
+                                                    '<?php echo addslashes($etu['email']); ?>',
+                                                    '<?php echo htmlspecialchars($etu['id_sp'] ?? ''); ?>',
+                                                    '<?php echo htmlspecialchars($etu['id_Sec'] ?? ''); ?>',
+                                                    '<?php echo htmlspecialchars($etu['groupe'] ?? 1); ?>'
+                                                )">Modif</button>
+
+                                                <!-- Bouton Supprimer -->
+                                                <form action="gestion_etudiants.php" method="POST" onsubmit="return confirm('Supprimer cet étudiant ?');" style="display:inline; margin: 0;">
                                                     <input type="hidden" name="id_etudiant_to_delete" value="<?php echo htmlspecialchars($etu['id_user']); ?>">
                                                     <button type="submit" name="supprimer_etudiant" class="btn-delete">Suppr</button>
                                                 </form>
@@ -682,24 +736,87 @@ try {
         </div>
     </div>
 
+    <!-- Modal de Modification d'un Étudiant -->
+    <div id="modalEdit">
+        <div class="modal-content">
+            <h3 style="margin-bottom: 15px; color: var(--header);">Modifier l'étudiant</h3>
+            <form action="gestion_etudiants.php" method="POST">
+                <input type="hidden" id="edit_id_etu" name="id_etu_mod">
+                
+                <div class="form-group">
+                    <label for="edit_nom">Nom</label>
+                    <input type="text" id="edit_nom" name="nom" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit_prenom">Prénom</label>
+                    <input type="text" id="edit_prenom" name="prenom" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit_email">Adresse Email</label>
+                    <input type="email" id="edit_email" name="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit_id_spec">Spécialité</label>
+                    <select id="edit_id_spec" name="id_spec" onchange="surChangementSpecialite('edit_id_spec', 'edit_annee', 'edit_id_section')" required>
+                        <option value="">-- Choisir une spécialité --</option>
+                        <?php foreach ($specialites as $sp): ?>
+                            <option value="<?php echo htmlspecialchars($sp['id_sp']); ?>" data-annee="<?php echo htmlspecialchars($sp['annee']); ?>">
+                                <?php echo htmlspecialchars($sp['NomSp'] . ' (Année ' . $sp['annee'] . ')'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="edit_annee">Année d'étude (Automatique)</label>
+                    <input type="number" id="edit_annee" name="annee" readonly style="background-color: #eee;" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="edit_id_section">Section</label>
+                    <select id="edit_id_section" name="id_section" required>
+                        <option value="">-- Choisir une section --</option>
+                        <?php foreach ($sections as $sec): ?>
+                            <option value="<?php echo htmlspecialchars($sec['id_Sec']); ?>" data-idsp="<?php echo htmlspecialchars($sec['id_sp']); ?>" data-maxgroupes="<?php echo htmlspecialchars($sec['nombre_groupes'] ?? 4); ?>">
+                                <?php echo htmlspecialchars($sec['nom_sec'] ?? 'Section ' . $sec['id_Sec']); ?> (Max groupes : <?php echo htmlspecialchars($sec['nombre_groupes'] ?? 4); ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="edit_groupe">Numéro du groupe</label>
+                    <input type="number" id="edit_groupe" name="groupe" min="1" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="edit_password">Nouveau mot de passe (Laisser vide si inchangé)</label>
+                    <input type="password" id="edit_password" name="password" placeholder="Laisser vide pour garder l'actuel">
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" name="modifier_etudiant" class="btn-submit" style="margin-top: 0;">Enregistrer</button>
+                    <button type="button" onclick="fermerModalEdit()" class="btn-submit" style="background-color: #6c757d; margin-top: 0;">Annuler</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
-        // Fonction de filtrage dynamique des sections selon la spécialité
-        function surChangementSpecialite() {
-            var selectSp = document.getElementById('id_spec');
+        // Fonction générique de filtrage dynamique des sections selon la spécialité
+        function surChangementSpecialite(idSelectSp, idInputAnnee, idSelectSec, sectionPreselectionnee = '') {
+            var selectSp = document.getElementById(idSelectSp);
             var idSpChoisi = selectSp.value;
             var optionChoisie = selectSp.options[selectSp.selectedIndex];
 
             // 1. Remplissage automatique de l'année
-            var anneeInput = document.getElementById('annee');
-            var annee = optionChoisie.getAttribute('data-annee');
-            if (annee) {
-                anneeInput.value = annee;
-            } else {
-                anneeInput.value = '';
-            }
+            var anneeInput = document.getElementById(idInputAnnee);
+            var annee = optionChoisie ? optionChoisie.getAttribute('data-annee') : '';
+            anneeInput.value = annee ? annee : '';
 
             // 2. Filtrage des sections rattachées à cette spécialité
-            var selectSec = document.getElementById('id_section');
+            var selectSec = document.getElementById(idSelectSec);
             var optionsSec = selectSec.options;
             var nbSectionsTrouvees = 0;
 
@@ -727,10 +844,33 @@ try {
 
             if (nbSectionsTrouvees > 0) {
                 optionsSec[0].text = '-- Choisir une section (' + nbSectionsTrouvees + ' dispo) --';
+                if (sectionPreselectionnee) {
+                    selectSec.value = sectionPreselectionnee;
+                }
             } else {
                 optionsSec[0].text = '-- Aucune section pour cette spécialité --';
                 selectSec.disabled = true;
             }
+        }
+
+        // Gestion du Modal de modification
+        function ouvrirModalEdit(id, nom, prenom, email, id_sp, id_sec, groupe) {
+            document.getElementById('edit_id_etu').value = id;
+            document.getElementById('edit_nom').value = nom;
+            document.getElementById('edit_prenom').value = prenom;
+            document.getElementById('edit_email').value = email;
+            document.getElementById('edit_id_spec').value = id_sp;
+            document.getElementById('edit_groupe').value = groupe;
+            document.getElementById('edit_password').value = '';
+
+            // Filtrer les sections et présélectionner la section actuelle de l'étudiant
+            surChangementSpecialite('edit_id_spec', 'edit_annee', 'edit_id_section', id_sec);
+
+            document.getElementById('modalEdit').style.display = 'flex';
+        }
+
+        function fermerModalEdit() {
+            document.getElementById('modalEdit').style.display = 'none';
         }
 
         // Gestion du menu déroulant de l'avatar utilisateur
@@ -748,17 +888,17 @@ try {
         }
 
         function toggleSubmenu() {
-    var submenu = document.getElementById('submenuNotes');
-    var arrow = document.getElementById('arrow');
-    
-    if (submenu.style.display === 'none' || submenu.style.display === '') {
-        submenu.style.display = 'flex'; // Affiche le sous-menu
-        arrow.textContent = '▴';       // Change la flèche vers le haut
-    } else {
-        submenu.style.display = 'none'; // Masque le sous-menu
-        arrow.textContent = '▾';       // Change la flèche vers le bas
-    }
-}
+            var submenu = document.getElementById('submenuNotes');
+            var arrow = document.getElementById('arrow');
+            
+            if (submenu.style.display === 'none' || submenu.style.display === '') {
+                submenu.style.display = 'flex';
+                arrow.textContent = '▴';
+            } else {
+                submenu.style.display = 'none';
+                arrow.textContent = '▾';
+            }
+        }
     </script>
 
 </body>

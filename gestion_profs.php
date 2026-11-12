@@ -23,7 +23,7 @@ try {
         $id_prof = trim($_POST['id_prof']);
         $nom = trim($_POST['nom']);
         $prenom = trim($_POST['prenom']);
-        $email = trim($_POST['email']?? NULL);
+        $email = trim($_POST['email'] ?? NULL);
         $password = trim($_POST['password']);
         $grade = trim($_POST['grade']);
         $id_departement = !empty($_POST['id_Dep']) ? trim($_POST['id_Dep']) : null;
@@ -43,7 +43,7 @@ try {
                 $stmt_user = $pdo->prepare("INSERT INTO user (id_user, nom, prenom, email, mdP, role) VALUES (?, ?, ?, ?, ?, 'prof')");
                 $stmt_user->execute([$id_prof, $nom, $prenom, $email, $hashed_password]);
 
-                // Insertion dans la table fille 'prof' avec id_departement
+                // Insertion dans la table fille 'prof' avec id_Dep
                 $stmt_prof = $pdo->prepare("INSERT INTO prof (id_user, grade, id_Dep) VALUES (?, ?, ?)");
                 $stmt_prof->execute([$id_prof, $grade, $id_departement]);
 
@@ -55,7 +55,49 @@ try {
         }
     }
 
-    // 2. Traitement de la suppression d'un professeur
+    // 2. Traitement de la modification d'un professeur existant
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_prof'])) {
+        $id_prof_mod = trim($_POST['id_prof_mod']);
+        $nom = trim($_POST['nom']);
+        $prenom = trim($_POST['prenom']);
+        $email = trim($_POST['email']);
+        $grade = trim($_POST['grade']);
+        $id_Dep = !empty($_POST['id_Dep']) ? trim($_POST['id_Dep']) : null;
+        $nouveau_mdp = trim($_POST['password'] ?? '');
+
+        if (!empty($id_prof_mod) && !empty($nom) && !empty($prenom) && !empty($email)) {
+            // Vérifier si l'email appartient à un autre utilisateur
+            $stmt_check_email = $pdo->prepare("SELECT id_user FROM user WHERE email = ? AND id_user != ?");
+            $stmt_check_email->execute([$email, $id_prof_mod]);
+
+            if ($stmt_check_email->rowCount() > 0) {
+                $error = "Cette adresse email est déjà utilisée par un autre compte.";
+            } else {
+                $pdo->beginTransaction();
+
+                // Mettre à jour la table user (avec ou sans nouveau mot de passe)
+                if (!empty($nouveau_mdp)) {
+                    $hashed_password = password_hash($nouveau_mdp, PASSWORD_DEFAULT);
+                    $stmt_up_user = $pdo->prepare("UPDATE user SET nom = ?, prenom = ?, email = ?, mdP = ? WHERE id_user = ?");
+                    $stmt_up_user->execute([$nom, $prenom, $email, $hashed_password, $id_prof_mod]);
+                } else {
+                    $stmt_up_user = $pdo->prepare("UPDATE user SET nom = ?, prenom = ?, email = ? WHERE id_user = ?");
+                    $stmt_up_user->execute([$nom, $prenom, $email, $id_prof_mod]);
+                }
+
+                // Mettre à jour la table prof (grade et département)
+                $stmt_up_prof = $pdo->prepare("UPDATE prof SET grade = ?, id_Dep = ? WHERE id_user = ?");
+                $stmt_up_prof->execute([$grade, $id_Dep, $id_prof_mod]);
+
+                $pdo->commit();
+                $message = "Les informations du professeur ont été mises à jour avec succès !";
+            }
+        } else {
+            $error = "Veuillez remplir les champs obligatoires pour la modification.";
+        }
+    }
+
+    // 3. Traitement de la suppression d'un professeur
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_prof'])) {
         $id_prof_to_delete = trim($_POST['id_prof_to_delete']);
 
@@ -71,22 +113,22 @@ try {
         $message = "Le professeur a été supprimé avec succès.";
     }
 
-    // 3. Récupérer la liste des départements pour le menu déroulant
+    // 4. Récupérer la liste des départements pour les menus déroulants
     $stmt_dept = $pdo->query("SELECT * FROM departement");
     $departements = $stmt_dept->fetchAll(PDO::FETCH_ASSOC);
 
-    // 4. Gestion de la recherche par nom ou prénom avec jointure sur le département
+    // 5. Gestion de la recherche par nom ou prénom avec jointure sur le département
     $search = trim($_GET['search'] ?? '');
 
     if (!empty($search)) {
-        $stmt_profs = $pdo->prepare("SELECT u.id_user, u.nom, u.prenom, u.email, p.grade, d.Nom_Dep 
+        $stmt_profs = $pdo->prepare("SELECT u.id_user, u.nom, u.prenom, u.email, p.grade, p.id_Dep, d.Nom_Dep 
                                    FROM prof p 
                                    JOIN user u ON p.id_user COLLATE utf8mb4_unicode_ci = u.id_user COLLATE utf8mb4_unicode_ci 
-                                   LEFT JOIN departement d ON p.id_Dep = d.id_dept
+                                   LEFT JOIN departement d ON p.id_Dep = d.id_Dep
                                    WHERE u.nom LIKE ? OR u.prenom LIKE ?");
         $stmt_profs->execute(["%$search%", "%$search%"]);
     } else {
-        $stmt_profs = $pdo->query("SELECT u.id_user, u.nom, u.prenom, u.email, p.grade, d.Nom_Dep 
+        $stmt_profs = $pdo->query("SELECT u.id_user, u.nom, u.prenom, u.email, p.grade, p.id_Dep, d.Nom_Dep 
                                    FROM prof p 
                                    JOIN user u ON p.id_user COLLATE utf8mb4_unicode_ci = u.id_user COLLATE utf8mb4_unicode_ci
                                    LEFT JOIN departement d ON p.id_Dep = d.id_Dep");
@@ -184,21 +226,6 @@ try {
             background-color: var(--accent);
             color: var(--on-accent);
             font-weight: 600;
-        }
-
-        .btn-logout {
-            background-color: var(--error);
-            color: var(--on-error);
-            padding: 10px;
-            border-radius: 8px;
-            text-align: center;
-            text-decoration: none;
-            font-weight: 600;
-            transition: opacity 0.2s;
-        }
-
-        .btn-logout:hover {
-            opacity: 0.9;
         }
 
         .main-content {
@@ -365,16 +392,31 @@ try {
             background-color: var(--menu);
         }
 
+        .btn-edit {
+            background-color: var(--menu);
+            color: var(--on-blue);
+            border: none;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-top:10px;
+        }
+
         .btn-delete {
             background-color: var(--error);
             color: var(--on-error);
             border: none;
-            padding: 6px 12px;
+            padding: 6px 10px;
             border-radius: 4px;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
             transition: opacity 0.2s;
+            margin-top:10px;
         }
 
         .btn-delete:hover {
@@ -421,14 +463,15 @@ try {
             border: 1px solid #f5c6cb;
         }
 
-
+        /* Modal de modification */
+        #modalEdit { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: white; padding: 25px; border-radius: 10px; width: 450px; max-width: 90%; }
 
         /* Style du profil utilisateur cliquable */
         .user-menu-container { position: relative; display: inline-block; cursor: pointer; }
         .user-profile { display: flex; align-items: center; gap: 12px; }
         .user-avatar { width: 38px; height: 38px; background-color: var(--accent); color: var(--on-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
         
-        /* Dropdown du profil */
         .user-dropdown {
             display: none;
             position: absolute;
@@ -448,52 +491,17 @@ try {
         .dropdown-item { display: block; width: 100%; padding: 8px 10px; text-align: left; background: none; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; color: var(--text); margin-bottom: 5px; }
         .dropdown-item:hover { background-color: var(--bg); }
         .dropdown-item.logout { background-color: var(--error); color: var(--on-error); text-align: center; }
-        .dropdown-item.logout:hover { opacity: 0.9; }
 
-        .menu-dropdown {
-    position: relative;
-}
-
-.dropdown-toggle {
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-/* Le sous-menu */
-.submenu {
-    flex-direction: column;
-    gap: 4px;
-    padding-left: 15px;
-    margin-top: 4px;
-    margin-bottom: 4px;
-    border-left: 2px solid rgba(255, 255, 255, 0.2);
-}
-
-.submenu-item {
-    color: rgba(255, 255, 255, 0.85);
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 13px;
-    font-weight: 400;
-    transition: background 0.2s, color 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.submenu-item:hover, .submenu-item.active {
-    background-color: var(--accent);
-    color: var(--on-accent);
-    font-weight: 600;
-}
+        .menu-dropdown { position: relative; }
+        .dropdown-toggle { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .submenu { flex-direction: column; gap: 4px; padding-left: 15px; margin-top: 4px; margin-bottom: 4px; border-left: 2px solid rgba(255, 255, 255, 0.2); }
+        .submenu-item { color: rgba(255, 255, 255, 0.85); padding: 8px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+        .submenu-item:hover, .submenu-item.active { background-color: var(--accent); color: var(--on-accent); font-weight: 600; }
     </style>
 </head>
 <body>
 
-    <!-- Sidebar Unifiée -->
+    <!-- Sidebar -->
     <div class="sidebar">
         <div class="sidebar-top">
             <div class="logo-area">
@@ -509,13 +517,10 @@ try {
                 <a href="gestion_specialites.php" class="menu-item">📚 Spécialités & Départements</a>
                 <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
                 <div class="menu-dropdown">
-                    <!-- Le lien principal qui déclenche l'affichage au clic -->
                     <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
                         <span>📢 Notes, Absences & Annonces</span> 
                         <span id="arrow" style="font-size: 11px;">▾</span>
                     </a>
-                    
-                    <!-- Le sous-menu masqué par défaut grâce à l'attribut style="display: none;" -->
                     <div class="submenu" id="submenuNotes" style="display: none;">
                         <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
                         <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
@@ -531,14 +536,12 @@ try {
         <div class="top-navbar">
             <h2>Espace Scolarité - Gestion des Profs</h2>
             
-            <!-- Profil utilisateur cliquable avec menu déroulant -->
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
                     <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
                     <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
                 </div>
 
-                <!-- Dropdown affiché au clic -->
                 <div id="userDropdown" class="user-dropdown">
                     <div class="dropdown-header">
                         Connecté en tant que<br>
@@ -580,7 +583,7 @@ try {
                         </div>
                         <div class="form-group">
                             <label for="email">Adresse Email</label>
-                            <input type="email" id="email" name="email"  placeholder="prof@usthb.dz">
+                            <input type="email" id="email" name="email" placeholder="prof@usthb.dz">
                         </div>
                         <div class="form-group">
                             <label for="password">Mot de passe temporaire</label>
@@ -588,15 +591,15 @@ try {
                         </div>
                         <div class="form-group">
                             <label for="grade">Grade / Titre</label>
-                            <input type="text" id="grade" name="grade"  placeholder="Ex: Professeur, MCA, MAB">
+                            <input type="text" id="grade" name="grade" placeholder="Ex: Professeur, MCA, MAB">
                         </div>
                         <div class="form-group">
-                            <label for="id_departement">Département de rattachement (Optionnel)</label>
-                            <select id="id_departement" name="id_departement">
+                            <label for="id_departement">Département de rattachement</label>
+                            <select id="id_departement" name="id_Dep">
                                 <option value="">-- Aucun département --</option>
                                 <?php foreach ($departements as $dept): ?>
                                     <option value="<?php echo htmlspecialchars($dept['id_Dep']); ?>">
-                                        <?php echo htmlspecialchars($dept['Nom_Dep'] ?? 'Département ' . $dept['id_dept']); ?>
+                                        <?php echo htmlspecialchars($dept['Nom_Dep']); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -629,7 +632,7 @@ try {
                                         <th>Grade</th>
                                         <th>Département</th>
                                         <th>Email</th>
-                                        <th>Action</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -640,7 +643,12 @@ try {
                                             <td><?php echo htmlspecialchars($prof['grade']); ?></td>
                                             <td><?php echo htmlspecialchars($prof['Nom_Dep'] ?? 'Non rattaché'); ?></td>
                                             <td><?php echo htmlspecialchars($prof['email']); ?></td>
-                                            <td>
+                                            <td style="display: flex; gap: 5px;">
+                                                <!-- Bouton de modification -->
+                                                <button type="button" class="btn-edit" onclick="ouvrirModalEdit('<?php echo $prof['id_user']; ?>', '<?php echo addslashes($prof['nom']); ?>', '<?php echo addslashes($prof['prenom']); ?>', '<?php echo addslashes($prof['email']); ?>', '<?php echo addslashes($prof['grade']); ?>', '<?php echo htmlspecialchars($prof['id_Dep'] ?? ''); ?>')">
+                                                    Modifier
+                                                </button>
+
                                                 <form action="gestion_profs.php" method="POST" onsubmit="return confirm('Voulez-vous vraiment supprimer ce professeur ?');" style="display:inline;">
                                                     <input type="hidden" name="id_prof_to_delete" value="<?php echo htmlspecialchars($prof['id_user']); ?>">
                                                     <button type="submit" name="supprimer_prof" class="btn-delete">Supprimer</button>
@@ -657,16 +665,60 @@ try {
         </div>
     </div>
 
+    <!-- Modal de Modification d'un Professeur -->
+    <div id="modalEdit">
+        <div class="modal-content">
+            <h3 style="margin-bottom: 15px; color: var(--header);">Modifier le professeur</h3>
+            <form action="gestion_profs.php" method="POST">
+                <input type="hidden" id="edit_id_prof" name="id_prof_mod">
+                
+                <div class="form-group">
+                    <label for="edit_nom">Nom</label>
+                    <input type="text" id="edit_nom" name="nom" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit_prenom">Prénom</label>
+                    <input type="text" id="edit_prenom" name="prenom" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit_email">Adresse Email</label>
+                    <input type="email" id="edit_email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit_grade">Grade / Titre</label>
+                    <input type="text" id="edit_grade" name="grade">
+                </div>
+                <div class="form-group">
+                    <label for="edit_dept">Département de rattachement</label>
+                    <select id="edit_dept" name="id_Dep">
+                        <option value="">-- Aucun département --</option>
+                        <?php foreach ($departements as $dept): ?>
+                            <option value="<?php echo htmlspecialchars($dept['id_Dep']); ?>">
+                                <?php echo htmlspecialchars($dept['Nom_Dep']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="edit_password">Nouveau mot de passe (Laisser vide si inchangé)</label>
+                    <input type="password" id="edit_password" name="password" placeholder="Laisser vide pour garder l'actuel">
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" name="modifier_prof" class="btn-submit">Enregistrer</button>
+                    <button type="button" onclick="fermerModalEdit()" class="btn-submit" style="background-color: #6c757d;">Annuler</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <script>
-        // Gestion du menu déroulant de l'avatar utilisateur
         function toggleUserMenu(event) {
             event.stopPropagation();
             var dropdown = document.getElementById('userDropdown');
             dropdown.classList.toggle('active');
         }
 
-        // Fermer le menu si on clique ailleurs sur la page
         window.onclick = function(event) {
             var dropdown = document.getElementById('userDropdown');
             if (dropdown && dropdown.classList.contains('active')) {
@@ -675,18 +727,33 @@ try {
         }
 
         function toggleSubmenu() {
-    var submenu = document.getElementById('submenuNotes');
-    var arrow = document.getElementById('arrow');
-    
-    if (submenu.style.display === 'none' || submenu.style.display === '') {
-        submenu.style.display = 'flex'; // Affiche le sous-menu
-        arrow.textContent = '▴';       // Change la flèche vers le haut
-    } else {
-        submenu.style.display = 'none'; // Masque le sous-menu
-        arrow.textContent = '▾';       // Change la flèche vers le bas
-    }
-}
-    </script>
+            var submenu = document.getElementById('submenuNotes');
+            var arrow = document.getElementById('arrow');
+            
+            if (submenu.style.display === 'none' || submenu.style.display === '') {
+                submenu.style.display = 'flex';
+                arrow.textContent = '▴';
+            } else {
+                submenu.style.display = 'none';
+                arrow.textContent = '▾';
+            }
+        }
 
+        // Fonctions pour gérer le Modal de modification
+        function ouvrirModalEdit(id, nom, prenom, email, grade, id_dep) {
+            document.getElementById('edit_id_prof').value = id;
+            document.getElementById('edit_nom').value = nom;
+            document.getElementById('edit_prenom').value = prenom;
+            document.getElementById('edit_email').value = email;
+            document.getElementById('edit_grade').value = grade;
+            document.getElementById('edit_dept').value = id_dep;
+            document.getElementById('edit_password').value = '';
+            document.getElementById('modalEdit').style.display = 'flex';
+        }
+
+        function fermerModalEdit() {
+            document.getElementById('modalEdit').style.display = 'none';
+        }
+    </script>
 </body>
 </html>

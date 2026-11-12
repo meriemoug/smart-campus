@@ -1,7 +1,10 @@
 <?php
 session_start();
 
-
+if (!isset($_SESSION['id_user'])) {
+    header('Location: login.php');
+    exit();
+}
 
 $host = 'localhost';
 $db   = 'smart_campus';
@@ -16,6 +19,7 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     $id_user = $_SESSION['id_user'];
+    $role = strtolower($_SESSION['role'] ?? '');
 
     // 1. Traitement de la modification du profil
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_profil'])) {
@@ -69,7 +73,7 @@ try {
         }
     }
 
-    // 2. Récupérer les informations actuelles fraîches de la base de données
+    // 2. Récupérer les informations actuelles de la base de données
     $stmt_get = $pdo->prepare("SELECT * FROM user WHERE id_user = ?");
     $stmt_get->execute([$id_user]);
     $current_user = $stmt_get->fetch(PDO::FETCH_ASSOC);
@@ -278,77 +282,94 @@ try {
         }
 
         .menu-dropdown {
-    position: relative;
-}
+            position: relative;
+        }
 
-.dropdown-toggle {
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
+        .dropdown-toggle {
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
 
-/* Le sous-menu */
-.submenu {
-    flex-direction: column;
-    gap: 4px;
-    padding-left: 15px;
-    margin-top: 4px;
-    margin-bottom: 4px;
-    border-left: 2px solid rgba(255, 255, 255, 0.2);
-}
+        .submenu {
+            flex-direction: column;
+            gap: 4px;
+            padding-left: 15px;
+            margin-top: 4px;
+            margin-bottom: 4px;
+            border-left: 2px solid rgba(255, 255, 255, 0.2);
+        }
 
-.submenu-item {
-    color: rgba(255, 255, 255, 0.85);
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 13px;
-    font-weight: 400;
-    transition: background 0.2s, color 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
+        .submenu-item {
+            color: rgba(255, 255, 255, 0.85);
+            padding: 8px 12px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 400;
+            transition: background 0.2s, color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
 
-.submenu-item:hover, .submenu-item.active {
-    background-color: var(--accent);
-    color: var(--on-accent);
-    font-weight: 600;
-}
+        .submenu-item:hover, .submenu-item.active {
+            background-color: var(--accent);
+            color: var(--on-accent);
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
 
-    <!-- Sidebar -->
+    <!-- Sidebar Dynamique selon le Rôle -->
     <div class="sidebar">
         <div class="sidebar-top">
             <div class="logo-area">
                 <span>🎓 Smart Campus</span>
             </div>
             <div class="menu">
-                <?php if (!empty($_SESSION['is_super_admin'])): ?>
-                    <a href="admin_principal_dashboard.php" class="menu-item">👥 Agents de scolarité</a>
-                <?php endif; ?>
-                <a href="gestion_profs.php" class="menu-item">👨‍🏫 Professeurs</a>
-                <a href="gestion_etudiants.php" class="menu-item">🎓 Étudiants</a>
-                <a href="gestion_sections.php" class="menu-item">🏢 Sections</a>
-                <a href="gestion_specialites.php" class="menu-item">📚 Spécialités & Départements</a>
-                <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
-                <div class="menu-dropdown">
-                    <!-- Le lien principal qui déclenche l'affichage au clic -->
-                    <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
-                        <span>📢 Notes, Absences & Annonces</span> 
-                        <span id="arrow" style="font-size: 11px;">▾</span>
-                    </a>
-                    
-                    <!-- Le sous-menu masqué par défaut grâce à l'attribut style="display: none;" -->
-                    <div class="submenu" id="submenuNotes" style="display: none;">
-                        <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
-                        <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
-                        <a href="gestion_annonces.php" class="submenu-item">📢 Annonces</a>
+                <?php if ($role === 'scolarite'): ?>
+                    <!-- Menu Scolarité -->
+                    <?php if (!empty($_SESSION['is_super_admin'])): ?>
+                        <a href="admin_principal_dashboard.php" class="menu-item">👥 Agents de scolarité</a>
+                    <?php endif; ?>
+                    <a href="gestion_profs.php" class="menu-item">👨‍🏫 Professeurs</a>
+                    <a href="gestion_etudiants.php" class="menu-item">🎓 Étudiants</a>
+                    <a href="gestion_sections.php" class="menu-item">🏢 Sections</a>
+                    <a href="gestion_specialites.php" class="menu-item">📚 Spécialités & Départements</a>
+                    <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
+                    <div class="menu-dropdown">
+                        <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
+                            <span>📢 Notes, Absences & Annonces</span> 
+                            <span id="arrow" style="font-size: 11px;">▾</span>
+                        </a>
+                        <div class="submenu" id="submenuNotes" style="display: none;">
+                            <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
+                            <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
+                            <a href="gestion_annonces.php" class="submenu-item">📢 Annonces</a>
+                        </div>
                     </div>
-                </div> 
+
+                <?php elseif ($role === 'prof' || $role === 'professeur' || $role === 'enseignant'): ?>
+                    <!-- Menu Enseignant / Professeur -->
+                    <a href="prof_dashboard.php" class="menu-item">📅 Emploi du temps</a>
+                    <a href="prof_gestion_notes.php" class="menu-item">📊 Gestion des Notes</a>
+                    <a href="prof_horaires_consultation.php" class="menu-item">🕒 Horaires de Consultation</a>
+                    <a href="prof_ressources_pedagogiques.php" class="menu-item">📁 Gestion des Ressources</a>
+                    <a href="prof_annonces.php" class="menu-item">📢 Annonces</a>
+                    <a href="prof_presence.php" class="menu-item">📋 Liste de Présence</a>
+                    <a href="prof_planning_examens.php" class="menu-item">📅 Planning des Examens</a>
+
+                <?php elseif ($role === 'etudiant'): ?>
+                    <!-- Menu Étudiant (Adaptez les liens selon vos pages étudiant existantes) -->
+                    <a href="etudiant_dashboard.php" class="menu-item">🏠 Tableau de bord</a>
+                    <a href="etudiant_notes.php" class="menu-item">📊 Mes Notes</a>
+                    <a href="etudiant_emploi.php" class="menu-item">📅 Emploi du temps</a>
+                    <a href="etudiant_absences.php" class="menu-item">🚫 Mes Absences</a>
+                    <a href="etudiant_annonces.php" class="menu-item">📢 Annonces</a>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -360,7 +381,18 @@ try {
         </div>
 
         <div class="content-body">
-            <a href="gestion_etudiants.php" class="back-link">← Retourner à l'espace de gestion</a>
+            <!-- Lien de retour dynamique selon le rôle -->
+            <?php 
+                $back_page = 'login.php';
+                if ($role === 'scolarite') {
+                    $back_page = 'gestion_etudiants.php';
+                } elseif ($role === 'prof' || $role === 'professeur' || $role === 'enseignant') {
+                    $back_page = 'prof_dashboard.php';
+                } elseif ($role === 'etudiant') {
+                    $back_page = 'etudiant_dashboard.php';
+                }
+            ?>
+            <a href="<?php echo $back_page; ?>" class="back-link">← Retourner à l'espace principal</a>
             
             <h3 class="section-title">Modifier mes informations personnelles</h3>
 
@@ -418,17 +450,17 @@ try {
 
     <script>
       function toggleSubmenu() {
-    var submenu = document.getElementById('submenuNotes');
-    var arrow = document.getElementById('arrow');
-    
-    if (submenu.style.display === 'none' || submenu.style.display === '') {
-        submenu.style.display = 'flex'; // Affiche le sous-menu
-        arrow.textContent = '▴';       // Change la flèche vers le haut
-    } else {
-        submenu.style.display = 'none'; // Masque le sous-menu
-        arrow.textContent = '▾';       // Change la flèche vers le bas
-    }
-}
+          var submenu = document.getElementById('submenuNotes');
+          var arrow = document.getElementById('arrow');
+          
+          if (submenu.style.display === 'none' || submenu.style.display === '') {
+              submenu.style.display = 'flex';
+              arrow.textContent = '▴';
+          } else {
+              submenu.style.display = 'none';
+              arrow.textContent = '▾';
+          }
+      }
     </script>
 
 </body>
