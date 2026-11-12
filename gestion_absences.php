@@ -223,16 +223,20 @@ try {
         <div class="top-navbar">
             <h2>Espace Scolarité - Gestion des Absences & Exclusions</h2>
             
+            <!-- Profil utilisateur cliquable avec menu déroulant -->
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
-                    <span><strong><?php echo htmlspecialchars($prenom_agent . ' ' . $nom_agent); ?></strong></span>
-                    <div class="user-avatar"><?php echo strtoupper(substr($prenom_agent, 0, 1)); ?></div>
+                    <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
+                    <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
                 </div>
+
+                <!-- Dropdown affiché au clic -->
                 <div id="userDropdown" class="user-dropdown">
                     <div class="dropdown-header">
                         Connecté en tant que<br>
-                        <span style="color: var(--menu); font-weight: 600;"><?php echo htmlspecialchars($_SESSION['email'] ?? 'Agent'); ?></span>
+                        <span style="color: var(--menu);"><?php echo htmlspecialchars($_SESSION['email'] ?? 'Scolarité'); ?></span>
                     </div>
+                    <a href="modifier_infos.php" class="dropdown-item">✏️ Modifier mes informations</a>
                     <a href="logout.php" class="dropdown-item logout">Se déconnecter</a>
                 </div>
             </div>
