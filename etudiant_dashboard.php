@@ -12,7 +12,8 @@ $error = '';
 
 try {
     // Annonces destinées aux étudiants, générales ou de leur section
-    $st = $pdo->prepare("SELECT a.titre, a.det, a.Date_Pub, u.nom, u.prenom, u.role
+    // + auteur de l'annonce (scolarité ou prof) via user
+    $st = $pdo->prepare("SELECT a.titre, a.det, a.Date_Pub, a.image, u.nom, u.prenom, u.role
                          FROM annonce a
                          LEFT JOIN user u ON u.id_user = a.id_user
                          WHERE a.cible IN ('tous','etudiants') AND (a.id_Sec IS NULL OR a.id_Sec = ?)
@@ -50,11 +51,11 @@ try {
 <div class="grid">
   <!-- Annonces -->
   <div>
-    <h3 class="section-title" style="font-size:18px">Annonces</h3>
+    
     <?php if (empty($annonces)): ?>
       <div class="card"><p class="muted">Aucune annonce pour le moment.</p></div>
     <?php else: foreach ($annonces as $a):
-        $nouveau = (time() - strtotime($a['Date_Pub'])) <= 3 * 86400; 
+        $nouveau = (time() - strtotime($a['Date_Pub'])) <= 3 * 86400;
         if (($a['role'] ?? '') === 'prof') {
             $icone  = '👨‍🏫';
             $auteur = 'Enseignant : Pr. ' . $a['nom'] . ' ' . $a['prenom'];
@@ -64,10 +65,13 @@ try {
         } else {
             $icone  = '📢';
             $auteur = 'Administration';
-        }
-        ?>
+        } ?>
       <article class="ann">
-        <!--<div class="ann-icon" aria-hidden="true"><?php echo $icone; ?></div>-->
+        <?php if (!empty($a['image'])): ?>
+          <img src="<?php echo htmlspecialchars($a['image']); ?>" alt="" style="width:56px;height:56px;border-radius:8px;object-fit:cover;flex:none">
+        <?php else: ?>
+          <!-- <div class="ann-icon" aria-hidden="true"><?php echo $icone; ?></div> -->
+        <?php endif; ?>
         <div>
           <h4><?php echo htmlspecialchars($a['titre']); ?><?php if ($nouveau): ?><span class="badge">Nouveau</span><?php endif; ?></h4>
           <p><?php echo htmlspecialchars($a['det']); ?></p>
