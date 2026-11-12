@@ -284,6 +284,8 @@ CREATE TABLE `resultat_etudiant` (
   `decision` varchar(50) DEFAULT 'En cours'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+ALTER TABLE `resultat_etudiant` ADD COLUMN `annee_academique` VARCHAR(20) DEFAULT '2026/2027';
+
 -- --------------------------------------------------------
 
 --

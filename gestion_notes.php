@@ -16,6 +16,7 @@ $error = '';
 $etudiants = [];
 $selected_specialite = $_GET['id_sp'] ?? $_POST['id_sp'] ?? '';
 $selected_section = $_GET['id_section'] ?? $_POST['id_section'] ?? '';
+$annee_academique = $_GET['annee_academique'] ?? $_POST['annee_academique'] ?? '2026/2027';
 $nom_section = '';
 $nom_specialite = '';
 
@@ -27,9 +28,9 @@ try {
     $stmt_specs = $pdo->query("SELECT id_sp, NomSp, annee FROM specialite ORDER BY NomSp ASC");
     $specialites = $stmt_specs->fetchAll(PDO::FETCH_ASSOC);
 
-    // Récupérer toutes les sections (avec leurs spécialités) pour le menu d'orientation globale
+    // Récupérer toutes les sections avec leurs spécialités pour l'orientation
     $stmt_all_secs = $pdo->query("
-        SELECT sec.id_Sec, sec.nom_sec, sp.NomSp, sp.annee 
+        SELECT sec.id_Sec, sec.nom_sec, sp.id_sp, sp.NomSp, sp.annee 
         FROM section sec 
         LEFT JOIN specialite sp ON sec.id_sp = sp.id_sp 
         ORDER BY sec.nom_sec ASC
@@ -47,7 +48,7 @@ try {
     // Infos de la section et spécialité courante
     if (!empty($selected_section)) {
         $stmt_sec_info = $pdo->prepare("
-            SELECT s.nom_sec, sp.NomSp, sp.annee 
+            SELECT s.nom_sec, sp.NomSp, sp.annee, sp.id_sp 
             FROM section s 
             LEFT JOIN specialite sp ON s.id_sp = sp.id_sp 
             WHERE s.id_Sec = ?
@@ -57,83 +58,127 @@ try {
         
         if ($sec_info) {
             $nom_section = $sec_info['nom_sec'];
-            $nom_specialite = $sec_info['NomSp'] . ' (' . $sec_info['annee'] . ')';
+            $nom_specialite = $sec_info['NomSp'] . ' (Niveau ' . $sec_info['annee'] . ')';
         }
     }
 
-    // 3. Traitement de l'orientation collective des étudiants ADMIS de la section
+    // 3. Traitement de l'orientation collective des étudiants ADMIS (Contrainte stricte : niveau cible supérieur)
     if (isset($_POST['orienter_admis']) && !empty($selected_section)) {
         $nouvelle_section_cible = $_POST['nouvelle_section_cible'] ?? '';
+        $annee_actuelle_debut = intval(substr($annee_academique, 0, 4));
+        $nouvelle_annee_acad = ($annee_actuelle_debut + 1) . '/' . ($annee_actuelle_debut + 2);
 
-        if (!empty($nouvelle_section_cible)) {
-            // Récupérer tous les id_user des étudiants de la section courante qui sont 'Admis'
-            $stmt_admis = $pdo->prepare("
-                SELECT e.id_user 
-                FROM etudiant e
-                JOIN resultat_etudiant r ON e.id_user = r.id_user
-                WHERE e.id_Sec = ? AND r.decision = 'Admis'
+        if (!empty($nouvelle_section_cible) && !empty($sec_info)) {
+            // Récupérer les infos de la section cible
+            $stmt_cible_info = $pdo->prepare("
+                SELECT sec.id_Sec, sec.id_sp, sp.annee AS niveau_cible, sp.NomSp 
+                FROM section sec 
+                LEFT JOIN specialite sp ON sec.id_sp = sp.id_sp 
+                WHERE sec.id_Sec = ?
             ");
-            $stmt_admis->execute([$selected_section]);
-            $admis_list = $stmt_admis->fetchAll(PDO::FETCH_COLUMN);
+            $stmt_cible_info->execute([$nouvelle_section_cible]);
+            $cible_info = $stmt_cible_info->fetch(PDO::FETCH_ASSOC);
 
-            if (!empty($admis_list)) {
-                $placeholders = implode(',', array_fill(0, count($admis_list), '?'));
-                $params = array_merge([$nouvelle_section_cible], $admis_list);
-                
-                // Mettre à jour leur nouvelle section dans la table etudiant
-                $stmt_update_sec = $pdo->prepare("
-                    UPDATE etudiant 
-                    SET id_Sec = ? 
-                    WHERE id_user IN ($placeholders)
-                ");
-                $stmt_update_sec->execute($params);
-                $message = "Tous les étudiants admis de cette section ont été orientés vers la nouvelle section avec succès !";
+            if ($cible_info) {
+                $id_sp_cible = $cible_info['id_sp'];
+                $niveau_actuel = intval($sec_info['annee'] ?? 1);
+                $niveau_cible = intval($cible_info['niveau_cible'] ?? 1);
+
+                // Vérification que le niveau cible est strictement supérieur au niveau actuel
+                if ($niveau_cible > $niveau_actuel) {
+                    // Récupérer UNIQUEMENT les étudiants dont la décision est STRICTEMENT 'Admis'
+                    $stmt_admis = $pdo->prepare("
+                        SELECT e.id_user 
+                        FROM etudiant e
+                        JOIN resultat_etudiant r ON e.id_user = r.id_user 
+                             AND r.annee_academique = ? 
+                             AND r.id_Sec = ?
+                        WHERE e.id_Sec = ? 
+                          AND r.decision = 'Admis'
+                    ");
+                    $stmt_admis->execute([$annee_academique, $selected_section, $selected_section]);
+                    $admis_list = $stmt_admis->fetchAll(PDO::FETCH_COLUMN);
+
+                    if (!empty($admis_list)) {
+                        $pdo->beginTransaction();
+
+                        foreach ($admis_list as $id_user) {
+                            // A. Mettre à jour la section, la spécialité et l'année dans la table etudiant
+                            $stmt_update_etu = $pdo->prepare("
+                                UPDATE etudiant 
+                                SET id_Sec = ?, id_sp = ?, annee = ? 
+                                WHERE id_user = ?
+                            ");
+                            $stmt_update_etu->execute([$nouvelle_section_cible, $id_sp_cible, $niveau_cible, $id_user]);
+
+                            // B. Créer une nouvelle ligne de résultat vierge pour la nouvelle année académique et la nouvelle section
+                            $stmt_insert_res = $pdo->prepare("
+                                INSERT INTO resultat_etudiant (id_user, annee_academique, id_sp, id_Sec, decision) 
+                                VALUES (?, ?, ?, ?, 'En cours')
+                            ");
+                            $stmt_insert_res->execute([$id_user, $nouvelle_annee_acad, $id_sp_cible, $nouvelle_section_cible]);
+                        }
+
+                        $pdo->commit();
+                        $message = "Les étudiants admis ont été orientés avec succès vers la nouvelle section pour l'année $nouvelle_annee_acad !";
+                    } else {
+                        $error = "Erreur : Aucun étudiant avec la décision 'Admis' n'a été trouvé pour cette année dans cette section.";
+                    }
+                } else {
+                    $error = "Erreur d'orientation : Le niveau de la section de destination doit être strictement supérieur au niveau actuel.";
+                }
             } else {
-                $error = "Aucun étudiant admis trouvé dans cette section à orienter.";
+                $error = "Section de destination introuvable.";
             }
         } else {
-            $error = "Veuillez sélectionner une section de destination.";
+            $error = "Veuillez sélectionner une section de destination valide.";
         }
     }
 
     // 4. Traitement du calcul & attribution des moyennes S1, S2, Finale et de la Décision
     if (isset($_POST['calculer_section']) && !empty($selected_section)) {
         
-        $stmt_etus_sec = $pdo->prepare("SELECT id_Etu, id_user FROM etudiant WHERE id_Sec = ?");
+        $stmt_etus_sec = $pdo->prepare("SELECT id_Etu, id_user, id_sp FROM etudiant WHERE id_Sec = ?");
         $stmt_etus_sec->execute([$selected_section]);
         $etudiants_section = $stmt_etus_sec->fetchAll(PDO::FETCH_ASSOC);
 
-        // Fonction pour calculer la moyenne d'un semestre (1 pour S1, 2 pour S2)
-        $calculerMoyenneSemestre = function($pdo, $id_etudiant, $semestre_num) {
+        // Fonction de calcul de moyenne semestrielle filtrée par spécialité
+        $calculerMoyenneSemestre = function($pdo, $id_etudiant, $id_sp_etudiant, $semestre_num) {
             $stmt_notes = $pdo->prepare("
                 SELECT n.Exam, n.TD, n.TP, p.coefficient 
                 FROM note n
                 JOIN programme p ON n.id_Mod = p.id_mod
-                WHERE n.id_Etud = ? AND p.semestre = ?
+                WHERE n.id_Etud = ? AND p.semestre = ? AND p.id_sp = ?
             ");
-            $stmt_notes->execute([$id_etudiant, $semestre_num]);
+            $stmt_notes->execute([$id_etudiant, $semestre_num, $id_sp_etudiant]);
             $notes_modules = $stmt_notes->fetchAll(PDO::FETCH_ASSOC);
 
             $points_totaux = 0;
             $coefficients_totaux = 0;
 
             foreach ($notes_modules as $mod) {
-                $exam = isset($mod['Exam']) ? floatval($mod['Exam']) : 0;
-                $td   = isset($mod['TD']) ? floatval($mod['TD']) : null;
-                $tp   = isset($mod['TP']) ? floatval($mod['TP']) : null;
+                $exam = $mod['Exam'];
+                $td   = $mod['TD'];
+                $tp   = $mod['TP'];
                 $coef = floatval($mod['coefficient']);
 
-                $moy_module = 0;
+                if ($exam === null && $td === null && $tp === null) {
+                    continue; // Ignorer les modules sans notes
+                }
 
-                // Application de la règle métier
-                if ($tp !== null && $td !== null) {
-                    $moy_module = ($tp * 0.2) + ($td * 0.2) + ($exam * 0.6); 
-                } elseif ($tp !== null) {
-                    $moy_module = ($tp * 0.4) + ($exam * 0.6);
-                } elseif ($td !== null) {
-                    $moy_module = ($td * 0.4) + ($exam * 0.6);
+                $exam_val = ($exam !== null) ? floatval($exam) : 0;
+                $td_val   = ($td !== null) ? floatval($td) : null;
+                $tp_val   = ($tp !== null) ? floatval($tp) : null;
+
+                $moy_module = 0;
+                if ($tp_val !== null && $td_val !== null) {
+                    $moy_module = ($tp_val * 0.2) + ($td_val * 0.2) + ($exam_val * 0.6); 
+                } elseif ($tp_val !== null) {
+                    $moy_module = ($tp_val * 0.4) + ($exam_val * 0.6);
+                } elseif ($td_val !== null) {
+                    $moy_module = ($td_val * 0.4) + ($exam_val * 0.6);
                 } else {
-                    $moy_module = $exam;
+                    $moy_module = $exam_val;
                 }
 
                 $points_totaux += ($moy_module * $coef);
@@ -146,50 +191,70 @@ try {
         foreach ($etudiants_section as $etu) {
             $id_etudiant = $etu['id_Etu'];
             $id_user = $etu['id_user'];
+            $id_sp_etudiant = $etu['id_sp'];
 
-            // Calculs S1 (1) et S2 (2)
-            $moyenne_s1 = $calculerMoyenneSemestre($pdo, $id_etudiant, 1);
-            $moyenne_s2 = $calculerMoyenneSemestre($pdo, $id_etudiant, 2);
+            $moyenne_s1 = $calculerMoyenneSemestre($pdo, $id_etudiant, $id_sp_etudiant, 1);
+            $moyenne_s2 = $calculerMoyenneSemestre($pdo, $id_etudiant, $id_sp_etudiant, 2);
 
-            // Calcul de la moyenne finale
+            // Récupérer les rattrapages éventuels saisis pour cette année
+            $stmt_rat = $pdo->prepare("SELECT rattrapage_s1, rattrapage_s2 FROM resultat_etudiant WHERE id_user = ? AND annee_academique = ? AND id_Sec = ?");
+            $stmt_rat->execute([$id_user, $annee_academique, $selected_section]);
+            $rat_data = $stmt_rat->fetch(PDO::FETCH_ASSOC);
+
+            $rattrapage_s1 = $rat_data['rattrapage_s1'] ?? null;
+            $rattrapage_s2 = $rat_data['rattrapage_s2'] ?? null;
+
+            $eff_s1 = ($rattrapage_s1 !== null) ? $rattrapage_s1 : $moyenne_s1;
+            $eff_s2 = ($rattrapage_s2 !== null) ? $rattrapage_s2 : $moyenne_s2;
+
             $moyenne_finale = null;
             $decision = 'En cours';
 
-            if ($moyenne_s1 !== null && $moyenne_s2 !== null) {
-                $moyenne_finale = ($moyenne_s1 + $moyenne_s2) / 2;
+            if ($eff_s1 !== null && $eff_s2 !== null) {
+                $moyenne_finale = ($eff_s1 + $eff_s2) / 2;
                 $decision = ($moyenne_finale >= 10) ? 'Admis' : 'Ajourné';
-            } elseif ($moyenne_s1 !== null) {
-                $moyenne_finale = $moyenne_s1;
-            } elseif ($moyenne_s2 !== null) {
-                $moyenne_finale = $moyenne_s2;
+            } elseif ($eff_s1 !== null) {
+                $moyenne_finale = $eff_s1;
+            } elseif ($eff_s2 !== null) {
+                $moyenne_finale = $eff_s2;
             }
 
-            // Enregistrement dans resultat_etudiant
-            $stmt_check = $pdo->prepare("SELECT id_resultat FROM resultat_etudiant WHERE id_user = ?");
-            $stmt_check->execute([$id_user]);
+            // Insertion ou Mise à jour (UPSERT) dans resultat_etudiant pour l'année académique et la section courante
+            $stmt_check = $pdo->prepare("SELECT id_resultat FROM resultat_etudiant WHERE id_user = ? AND annee_academique = ? AND id_Sec = ?");
+            $stmt_check->execute([$id_user, $annee_academique, $selected_section]);
 
             if ($stmt_check->rowCount() > 0) {
-                $stmt_up = $pdo->prepare("UPDATE resultat_etudiant SET moyenne_s1 = ?, moyenne_s2 = ?, moyenne_finale = ?, decision = ? WHERE id_user = ?");
-                $stmt_up->execute([$moyenne_s1, $moyenne_s2, $moyenne_finale, $decision, $id_user]);
+                $stmt_up = $pdo->prepare("
+                    UPDATE resultat_etudiant 
+                    SET moyenne_s1 = ?, moyenne_s2 = ?, moyenne_finale = ?, decision = ?, id_sp = ? 
+                    WHERE id_user = ? AND annee_academique = ? AND id_Sec = ?
+                ");
+                $stmt_up->execute([$moyenne_s1, $moyenne_s2, $moyenne_finale, $decision, $id_sp_etudiant, $id_user, $annee_academique, $selected_section]);
             } else {
-                $stmt_ins = $pdo->prepare("INSERT INTO resultat_etudiant (id_user, moyenne_s1, moyenne_s2, moyenne_finale, decision) VALUES (?, ?, ?, ?, ?)");
-                $stmt_ins->execute([$id_user, $moyenne_s1, $moyenne_s2, $moyenne_finale, $decision]);
+                $stmt_ins = $pdo->prepare("
+                    INSERT INTO resultat_etudiant (id_user, annee_academique, id_sp, id_Sec, moyenne_s1, moyenne_s2, moyenne_finale, decision) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt_ins->execute([$id_user, $annee_academique, $id_sp_etudiant, $selected_section, $moyenne_s1, $moyenne_s2, $moyenne_finale, $decision]);
             }
         }
-        $message = "Les moyennes de S1, S2, la moyenne finale et les décisions ont été calculées avec succès !";
+        $message = "Les moyennes, la moyenne finale et les décisions ont été calculées et enregistrées avec succès !";
     }
 
-    // 5. Récupérer les résultats pour l'affichage du tableau (sans les colonnes superflues)
+    // 5. Récupérer les résultats pour l'affichage du tableau filtré par année académique et section exacte
     if (!empty($selected_section)) {
         $stmt_resultats = $pdo->prepare("
-            SELECT e.id_user, u.nom, u.prenom, e.annee, e.groupe, r.moyenne_s1, r.moyenne_s2, r.moyenne_finale, r.decision
+            SELECT e.id_user, u.nom, u.prenom, e.annee, e.groupe, 
+                   r.moyenne_s1, r.rattrapage_s1, r.moyenne_s2, r.rattrapage_s2, r.moyenne_finale, r.decision
             FROM etudiant e
             JOIN user u ON e.id_user COLLATE utf8mb4_unicode_ci = u.id_user COLLATE utf8mb4_unicode_ci
-            LEFT JOIN resultat_etudiant r ON e.id_user = r.id_user
+            LEFT JOIN resultat_etudiant r ON e.id_user = r.id_user 
+                 AND r.annee_academique = ? 
+                 AND r.id_Sec = ?
             WHERE e.id_Sec = ?
             ORDER BY u.nom ASC
         ");
-        $stmt_resultats->execute([$selected_section]);
+        $stmt_resultats->execute([$annee_academique, $selected_section, $selected_section]);
         $etudiants = $stmt_resultats->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -231,15 +296,15 @@ try {
 
         .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
         .top-navbar { background-color: var(--header); color: var(--on-blue); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
-        .content-body { padding: 30px; max-width: 1200px; margin: 0 auto; width: 100%; }
+        .content-body { padding: 30px; max-width: 1350px; margin: 0 auto; width: 100%; }
 
         .card { background-color: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 25px; box-shadow: 0 4px 12px rgba(27,90,128,0.04); margin-bottom: 25px; }
         .section-title { color: var(--header); font-size: 20px; margin-bottom: 15px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
 
         .form-inline { display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap; }
-        .form-group { flex: 1; min-width: 250px; }
+        .form-group { flex: 1; min-width: 220px; }
         .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
-        .form-group select { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background: #FAFCFE; }
+        .form-group select, .form-group input { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background: #FAFCFE; }
         
         .btn-submit { background-color: var(--header); color: var(--on-blue); border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.2s; height: 42px; }
         .btn-submit:hover { background-color: var(--menu); }
@@ -248,8 +313,9 @@ try {
         .btn-orient { background-color: var(--header); color: white; border: none; padding: 8px 15px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
 
         table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
-        th, td { padding: 12px 15px; text-align: left; font-size: 14px; border-bottom: 1px solid #eee; }
+        th, td { padding: 12px 10px; text-align: left; font-size: 13px; border-bottom: 1px solid #eee; text-align: center; }
         th { background-color: #f1f5f9; color: var(--header); font-weight: 600; }
+        td:nth-child(2) { text-align: left; }
 
         .badge-admis { background-color: var(--success-bg); color: var(--success-text); padding: 5px 10px; border-radius: 4px; font-weight: 600; font-size: 12px; }
         .badge-ajourne { background-color: var(--danger-bg); color: var(--danger-text); padding: 5px 10px; border-radius: 4px; font-weight: 600; font-size: 12px; }
@@ -351,15 +417,21 @@ try {
 
             <!-- 1. Formulaire de filtre -->
             <div class="card">
-                <h3 class="section-title">Filtrer par Spécialité et Section</h3>
+                <h3 class="section-title">Filtrer par Année Académique, Spécialité et Section</h3>
                 <form action="gestion_notes.php" method="GET" class="form-inline">
+                    
+                    <div class="form-group">
+                        <label for="annee_academique">Année Académique :</label>
+                        <input type="text" name="annee_academique" id="annee_academique" value="<?php echo htmlspecialchars($annee_academique); ?>" placeholder="Ex: 2026/2027" required>
+                    </div>
+
                     <div class="form-group">
                         <label for="id_sp">Spécialité & Année :</label>
                         <select name="id_sp" id="id_sp" onchange="this.form.submit()" required>
                             <option value="">-- Choisir une spécialité --</option>
                             <?php foreach ($specialites as $sp): ?>
                                 <option value="<?php echo $sp['id_sp']; ?>" <?php echo ($selected_specialite == $sp['id_sp']) ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($sp['NomSp'] . ' (' . $sp['annee'] . ')'); ?>
+                                    <?php echo htmlspecialchars($sp['NomSp'] . ' (Niveau ' . $sp['annee'] . ')'); ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
@@ -386,43 +458,46 @@ try {
                 <div class="card">
                     <div class="section-title" style="margin-bottom: 20px;">
                         <div>
-                            <span>Section : <strong><?php echo htmlspecialchars($nom_section); ?></strong></span>
+                            <span>Section : <strong><?php echo htmlspecialchars($nom_section); ?></strong> (Année : <?php echo htmlspecialchars($annee_academique); ?>)</span>
                             <span class="section-info-badge">Spécialité : <?php echo htmlspecialchars($nom_specialite); ?></span>
                         </div>
-                        <form action="gestion_notes.php?id_sp=<?php echo urlencode($selected_specialite); ?>&id_section=<?php echo urlencode($selected_section); ?>" method="POST" style="display:inline;">
+                        <form action="gestion_notes.php?id_sp=<?php echo urlencode($selected_specialite); ?>&id_section=<?php echo urlencode($selected_section); ?>&annee_academique=<?php echo urlencode($annee_academique); ?>" method="POST" style="display:inline;">
                             <input type="hidden" name="id_section" value="<?php echo htmlspecialchars($selected_section); ?>">
+                            <input type="hidden" name="annee_academique" value="<?php echo htmlspecialchars($annee_academique); ?>">
                             <button type="submit" name="calculer_section" class="btn-calcul">⚙️ Calculer S1, S2 & Délibérer</button>
                         </form>
                     </div>
 
                     <!-- Bloc d'orientation collective pour les étudiants Admis -->
                     <div style="background: #fdf8e2; border: 1px solid var(--border); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                        <h4 style="color: var(--header); margin-bottom: 10px; font-size: 15px;">🚀 Orientation collective des étudiants ADMIS</h4>
-                        <form action="gestion_notes.php?id_sp=<?php echo urlencode($selected_specialite); ?>&id_section=<?php echo urlencode($selected_section); ?>" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+                        <h4 style="color: var(--header); margin-bottom: 10px; font-size: 15px;">🚀 Orientation collective des étudiants ADMIS (Vers l'année supérieure)</h4>
+                        <form action="gestion_notes.php?id_sp=<?php echo urlencode($selected_specialite); ?>&id_section=<?php echo urlencode($selected_section); ?>&annee_academique=<?php echo urlencode($annee_academique); ?>" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
                             <input type="hidden" name="id_section" value="<?php echo htmlspecialchars($selected_section); ?>">
-                            <div style="flex: 1; min-width: 300px;">
-                                <label for="nouvelle_section_cible" style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px;">Sélectionner la nouvelle section d'affectation pour les Admis :</label>
+                            <div style="flex: 1; min-width: 320px;">
+                                <label for="nouvelle_section_cible" style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px;">Section de destination (Niveau supérieur requis) :</label>
                                 <select name="nouvelle_section_cible" id="nouvelle_section_cible" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background: #fff;" required>
                                     <option value="">-- Choisir la section de destination --</option>
                                     <?php foreach ($toutes_sections as $sec): ?>
                                         <option value="<?php echo $sec['id_Sec']; ?>">
-                                            <?php echo htmlspecialchars($sec['nom_sec'] . ' — ' . $sec['NomSp'] . ' (' . $sec['annee'] . ')'); ?>
+                                            <?php echo htmlspecialchars($sec['nom_sec'] . ' — ' . $sec['NomSp'] . ' (Niveau ' . $sec['annee'] . ')'); ?>
                                         </option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
-                            <button type="submit" name="orienter_admis" class="btn-orient" onclick="return confirm('Confirmez-vous l\'affectation de tous les étudiants admis de cette section vers la nouvelle section ?');">Valider l'orientation collective</button>
+                            <button type="submit" name="orienter_admis" class="btn-orient" onclick="return confirm('Confirmez-vous l\'orientation des étudiants admis vers cette nouvelle section ?');">Valider l'orientation</button>
                         </form>
                     </div>
 
                     <table>
                         <thead>
                             <tr>
-                                <th>ID Étudiant</th>
+                                <th>ID</th>
                                 <th>Nom & Prénom</th>
-                                <th>Groupe</th>
+                                <th>Gr.</th>
                                 <th>Moy. S1</th>
+                                <th>Ratt. S1</th>
                                 <th>Moy. S2</th>
+                                <th>Ratt. S2</th>
                                 <th>Moyenne Finale</th>
                                 <th>Décision</th>
                             </tr>
@@ -435,7 +510,9 @@ try {
                                         <td><strong><?php echo htmlspecialchars($res['nom'] . ' ' . $res['prenom']); ?></strong></td>
                                         <td>Gr. <?php echo htmlspecialchars($res['groupe'] ?? 'N/A'); ?></td>
                                         <td><?php echo ($res['moyenne_s1'] !== null) ? number_format($res['moyenne_s1'], 2) : '-'; ?></td>
+                                        <td><?php echo ($res['rattrapage_s1'] !== null) ? number_format($res['rattrapage_s1'], 2) : '-'; ?></td>
                                         <td><?php echo ($res['moyenne_s2'] !== null) ? number_format($res['moyenne_s2'], 2) : '-'; ?></td>
+                                        <td><?php echo ($res['rattrapage_s2'] !== null) ? number_format($res['rattrapage_s2'], 2) : '-'; ?></td>
                                         <td><strong><?php echo ($res['moyenne_finale'] !== null) ? number_format($res['moyenne_finale'], 2) : '-'; ?></strong></td>
                                         <td>
                                             <?php if ($res['decision'] === 'Admis'): ?>
@@ -450,7 +527,7 @@ try {
                                 <?php endforeach; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="7" style="text-align: center; color: #777;">Aucun étudiant trouvé dans cette section.</td>
+                                    <td colspan="9" style="text-align: center; color: #777;">Aucun étudiant trouvé dans cette section pour l'année <?php echo htmlspecialchars($annee_academique); ?>.</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
