@@ -273,6 +273,7 @@ try {
                 <a href="prof_horaires_consultation.php" class="menu-item"><span>🕒</span> Horaire de Consultation</a>
                 <a href="prof_ressources_pedagogiques.php" class="menu-item active"><span>📁</span> Gestion des Ressources</a>
                 <a href="prof_annonces.php" class="menu-item"><span>📢</span> Annonces</a>
+                <a href="prof_presence.php" class="menu-item "><span>📋</span> Liste de Présence</a>
                 <a href="prof_planning_examens.php" class="menu-item"><span>📋</span> Planning des Examens</a>
             </div>
         </div>
