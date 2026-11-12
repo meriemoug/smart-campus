@@ -272,19 +272,17 @@ try {
         <div class="sidebar-top">
             <div class="logo-area"><span>🎓 Smart Campus | Prof</span></div>
             <div class="menu">
-                <a href="prof_emploi_du_temps.php" class="menu-item"><span>📅</span> Consulter Emploi du temps</a>
+                <a href="prof_dashboard.php" class="menu-item"><span>📅</span> Consulter Emploi du temps</a>
                 <a href="prof_gestion_notes.php" class="menu-item"><span>📊</span> Gestion des Notes</a>
                 <a href="prof_horaires_consultation.php" class="menu-item"><span>🕒</span> Horaire de Consultation</a>
                 <a href="prof_ressources_pedagogiques.php" class="menu-item"><span>📁</span> Gestion des Ressources</a>
                 <a href="prof_annonces.php" class="menu-item active"><span>📢</span> Annonces</a>
+                <a href="prof_presence.php" class="menu-item "><span>📋</span> Liste de Présence</a>
                 <a href="prof_planning_examens.php" class="menu-item"><span>📋</span> Planning des Examens</a>
             </div>
         </div>
 
-        <div class="user-info">
-            <span>👨‍🏫 <?php echo htmlspecialchars($prenom_prof . ' ' . $nom_prof); ?></span>
-            <a href="logout.php" class="btn-logout">Déconnexion</a>
-        </div>
+        
     </div>
 
     <!-- Main Content -->
