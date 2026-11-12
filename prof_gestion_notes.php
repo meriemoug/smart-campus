@@ -61,12 +61,12 @@ try {
     if (!empty($selected_section)) {
         $stmt_modules = $pdo->prepare("
             SELECT DISTINCT m.id_mod, m.nom_mod
-            FROM seance s
-            JOIN module m ON s.id_mod = m.id_mod
-            WHERE s.id_prof = ? AND s.id_Sec = ?
+            FROM enseignement en
+            JOIN module m ON en.id_mod = m.id_mod
+            WHERE en.id_prof = ?
             ORDER BY m.nom_mod ASC
         ");
-        $stmt_modules->execute([$id_prof, $selected_section]);
+        $stmt_modules->execute([$id_prof]);
         $modules_result = $stmt_modules->fetchAll(PDO::FETCH_ASSOC);
 
         foreach ($modules_result as $mod) {
