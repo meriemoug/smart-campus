@@ -6,37 +6,55 @@ require 'etu_header.php';
 require_once 'etu_functions.php';
 
 $par_sem = [1 => [], 2 => []];
+$annees = [];          // une ligne de résultat par année académique
 $res = null;
+$annee_sel = null;
 $error = '';
 
 try {
-    // Modules du programme + notes (même requête que « Mes notes »)
+    // Tous les résultats de l'étudiant, avec la spécialité et la section de CHAQUE année
+    $st = $pdo->prepare("SELECT r.*, sp.NomSp, s.nom_sec
+                         FROM resultat_etudiant r
+                         LEFT JOIN specialite sp ON sp.id_sp = r.id_sp
+                         LEFT JOIN section s ON s.id_Sec = r.id_Sec
+                         WHERE r.id_user = ?
+                         ORDER BY r.annee_academique DESC, r.id_resultat DESC");
+    $st->execute([$_SESSION['id_user']]);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) { $annees[$r['annee_academique']] ??= $r; }
+
+    // Année affichée : celle du filtre, sinon la plus récente
+    $annee_sel = $_GET['annee'] ?? array_key_first($annees);
+    if (!isset($annees[$annee_sel])) { $annee_sel = array_key_first($annees); }
+    $res = $annee_sel !== null ? $annees[$annee_sel] : null;
+
+    // Modules du programme de la spécialité de CETTE année + notes de l'étudiant
+    $id_sp_annee = $res['id_sp'] ?? $etu['id_sp'];
     $st = $pdo->prepare("SELECT p.semestre, p.coefficient, m.Nom_mod, n.TD, n.TP, n.Exam
                          FROM programme p
                          JOIN module m ON m.id_mod = p.id_mod
                          LEFT JOIN note n ON n.id_Mod = p.id_mod AND n.id_Etud = ?
                          WHERE p.id_sp = ?
                          ORDER BY p.semestre, m.Nom_mod");
-    $st->execute([$etu['id_Etu'], $etu['id_sp']]);
+    $st->execute([$etu['id_Etu'], $id_sp_annee]);
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         [$r['moy'], $r['has_ex']] = moyenne_module($r['TD'], $r['TP'], $r['Exam']);
         $par_sem[(int)$r['semestre']][] = $r;
     }
-
-    // Résultats officiels (moyennes de semestre, rattrapages, moyenne finale, décision)
-    $st = $pdo->prepare("SELECT * FROM resultat_etudiant WHERE id_user = ? LIMIT 1");
-    $st->execute([$_SESSION['id_user']]);
-    $res = $st->fetch(PDO::FETCH_ASSOC) ?: null;
 } catch (PDOException $e) {
     $error = "Impossible de charger votre relevé pour le moment. Réessayez plus tard.";
 }
 
+// Infos affichées en en-tête (celles de l'année choisie)
+$nom_sp  = $res['NomSp']   ?? ($etu['NomSp'] ?? '');
+$nom_sec = $res['nom_sec'] ?? ($etu['nom_sec'] ?? '-');
+$est_courante = ($annee_sel === null) || ($annee_sel === array_key_first($annees));
+
 // Classe visuelle de la décision (le texte reste toujours affiché)
 $decision = trim($res['decision'] ?? 'En cours');
 $d = mb_strtolower($decision);
-if (preg_match('/ajourn|non admis|redoubl|exclu/u', $d))      { $d_class = 'ko';   $d_icon = '❌'; }
-elseif (strpos($d, 'rattrap') !== false)                      { $d_class = 'warn'; $d_icon = '🔁'; }
-elseif (strpos($d, 'admis') !== false)                        { $d_class = 'ok';   $d_icon = '✅'; }
+if (preg_match('/ajourn|non admis|redoubl|exclu/u', $d))      { $d_class = 'ko';   $d_icon = ''; }
+elseif (strpos($d, 'rattrap') !== false)                      { $d_class = 'warn'; $d_icon = ''; }
+elseif (strpos($d, 'admis') !== false)                        { $d_class = 'ok';   $d_icon = ''; }
 else                                                          { $d_class = 'wait'; $d_icon = '⏳'; }
 ?>
 <style>
@@ -44,6 +62,9 @@ else                                                          { $d_class = 'wait
 .rl-head h3{margin-bottom:6px}
 .btn-print{background:var(--header);color:var(--on-blue);border:0;border-radius:8px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;min-height:44px}
 .btn-print:hover{background:var(--menu)}
+.years{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.yr{border:2px solid var(--header);background:var(--card);color:var(--header);font-weight:600;font-size:14px;padding:8px 16px;border-radius:99px;text-decoration:none;min-height:40px;display:inline-flex;align-items:center}
+.yr:hover{background:var(--bg)}.yr.active{background:var(--header);color:var(--on-blue)}
 .tbl-wrap{overflow-x:auto}
 .nt{width:100%;border-collapse:collapse;font-size:14px}
 .nt th,.nt td{padding:11px 12px;border-bottom:1px solid var(--border);text-align:center}
@@ -65,11 +86,20 @@ else                                                          { $d_class = 'wait
 }
 </style>
 
+<?php if (count($annees) > 0): ?>
+<div class="years no-print" role="group" aria-label="Choisir l'année académique">
+  <?php foreach ($annees as $a => $r): ?>
+    <a class="yr <?php echo $a === $annee_sel ? 'active' : ''; ?>" href="etudiant_releve.php?annee=<?php echo urlencode($a); ?>"><?php echo htmlspecialchars($a); ?></a>
+  <?php endforeach; ?>
+</div>
+<?php endif; ?>
+
 <div class="rl-head">
   <div>
-    
     <p class="muted">
-      <?php echo htmlspecialchars($etu['NomSp'] ?? ''); ?> · Section <?php echo htmlspecialchars($etu['nom_sec'] ?? '-'); ?> · Groupe <?php echo (int)$etu['groupe']; ?> · Année <?php echo (int)$etu['annee']; ?><br>
+      <?php echo htmlspecialchars($nom_sp); ?> · Section <?php echo htmlspecialchars($nom_sec); ?>
+      <?php if ($est_courante): ?> · Groupe <?php echo (int)$etu['groupe']; ?><?php endif; ?>
+      <?php if ($annee_sel !== null): ?> · Année académique <?php echo htmlspecialchars($annee_sel); ?><?php endif; ?><br>
       Édité le <?php echo date('d/m/Y'); ?>
     </p>
   </div>
@@ -96,7 +126,7 @@ else                                                          { $d_class = 'wait
               <td><strong><?php echo htmlspecialchars($m['Nom_mod']); ?></strong></td>
               <td><?php echo rtrim(rtrim(number_format((float)$m['coefficient'], 1, ',', ''), '0'), ','); ?></td>
               <td><?php if ($m['moy'] === null): ?><span class="muted">En attente</span>
-                  <?php else: ?><span class="moy <?php echo $m['moy'] >= 10 ? 'ok' : 'ko'; ?>"><?php echo $m['moy'] >= 10 ? '✔' : '✖'; ?> <?php echo fmt($m['moy']); ?></span><?php endif; ?></td>
+                  <?php else: ?><span class="moy <?php echo $m['moy'] >= 10 ? 'ok' : 'ko'; ?>"><?php echo $m['moy'] >= 10 ? '' : ''; ?> <?php echo fmt($m['moy']); ?></span><?php endif; ?></td>
             </tr>
           <?php endforeach; ?>
           </tbody>
