@@ -27,18 +27,34 @@ try {
     if (!isset($annees[$annee_sel])) { $annee_sel = array_key_first($annees); }
     $res = $annee_sel !== null ? $annees[$annee_sel] : null;
 
-    // Modules du programme de la spécialité de CETTE année + notes de l'étudiant
-    $id_sp_annee = $res['id_sp'] ?? $etu['id_sp'];
-    $st = $pdo->prepare("SELECT p.semestre, p.coefficient, m.Nom_mod, n.TD, n.TP, n.Exam
-                         FROM programme p
-                         JOIN module m ON m.id_mod = p.id_mod
-                         LEFT JOIN note n ON n.id_Mod = p.id_mod AND n.id_Etud = ?
-                         WHERE p.id_sp = ?
-                         ORDER BY p.semestre, m.Nom_mod");
-    $st->execute([$etu['id_Etu'], $id_sp_annee]);
-    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-        [$r['moy'], $r['has_ex']] = moyenne_module($r['TD'], $r['TP'], $r['Exam']);
-        $par_sem[(int)$r['semestre']][] = $r;
+    $est_courante = ($annee_sel === null) || ($annee_sel === array_key_first($annees));
+
+    if ($est_courante) {
+        // Année en cours : modules du programme + notes actuelles (table note)
+        $id_sp_annee = $res['id_sp'] ?? $etu['id_sp'];
+        $st = $pdo->prepare("SELECT p.semestre, p.coefficient, m.Nom_mod, n.TD, n.TP, n.Exam
+                             FROM programme p
+                             JOIN module m ON m.id_mod = p.id_mod
+                             LEFT JOIN note n ON n.id_Mod = p.id_mod AND n.id_Etud = ?
+                             WHERE p.id_sp = ?
+                             ORDER BY p.semestre, m.Nom_mod");
+        $st->execute([$etu['id_Etu'], $id_sp_annee]);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            [$r['moy'], $r['has_ex']] = moyenne_module($r['TD'], $r['TP'], $r['Exam']);
+            $par_sem[(int)$r['semestre']][] = $r;
+        }
+    } else {
+        // Année précédente : détail archivé au moment de la délibération (table resultat_module)
+        $st = $pdo->prepare("SELECT semestre, coefficient, nom_mod AS Nom_mod, td AS TD, tp AS TP, exam AS Exam, moyenne
+                             FROM resultat_module
+                             WHERE id_user = ? AND annee_academique = ?
+                             ORDER BY semestre, nom_mod");
+        $st->execute([$_SESSION['id_user'], $annee_sel]);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $r['moy']    = ($r['moyenne'] !== null) ? (float)$r['moyenne'] : null;
+            $r['has_ex'] = ($r['Exam'] !== null);
+            $par_sem[(int)$r['semestre']][] = $r;
+        }
     }
 } catch (PDOException $e) {
     $error = "Impossible de charger votre relevé pour le moment. Réessayez plus tard.";
@@ -116,7 +132,7 @@ else                                                          { $d_class = 'wait
     <div class="card" style="margin-top:20px">
       <h3>Semestre <?php echo $s; ?></h3>
       <?php if (empty($mods)): ?>
-        <p class="muted">Aucun module défini pour ce semestre.</p>
+        <p class="muted"><?php echo $est_courante ? 'Aucun module défini pour ce semestre.' : 'Le détail des modules de cette année n’a pas été archivé.'; ?></p>
       <?php else: ?>
         <div class="tbl-wrap"><table class="nt">
           <thead><tr><th>Module</th><th>Coef.</th><th>Moyenne du module</th></tr></thead>

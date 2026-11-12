@@ -237,6 +237,40 @@ try {
                 ");
                 $stmt_ins->execute([$id_user, $annee_academique, $id_sp_etudiant, $selected_section, $moyenne_s1, $moyenne_s2, $moyenne_finale, $decision]);
             }
+
+            // --- Archivage du détail des modules pour cette année académique ---
+            $stmt_mods = $pdo->prepare("
+                SELECT p.id_mod, p.semestre, p.coefficient, m.Nom_mod, n.TD, n.TP, n.Exam
+                FROM programme p
+                JOIN module m ON m.id_mod = p.id_mod
+                LEFT JOIN note n ON n.id_Mod = p.id_mod AND n.id_Etud = ?
+                WHERE p.id_sp = ?
+            ");
+            $stmt_mods->execute([$id_etudiant, $id_sp_etudiant]);
+
+            $stmt_arch = $pdo->prepare("
+                INSERT INTO resultat_module (id_user, annee_academique, id_mod, nom_mod, semestre, coefficient, td, tp, exam, moyenne)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE nom_mod = VALUES(nom_mod), semestre = VALUES(semestre),
+                    coefficient = VALUES(coefficient), td = VALUES(td), tp = VALUES(tp),
+                    exam = VALUES(exam), moyenne = VALUES(moyenne)
+            ");
+
+            foreach ($stmt_mods->fetchAll(PDO::FETCH_ASSOC) as $mod_arch) {
+                $a_td = ($mod_arch['TD'] !== null)   ? (float)$mod_arch['TD']   : null;
+                $a_tp = ($mod_arch['TP'] !== null)   ? (float)$mod_arch['TP']   : null;
+                $a_ex = ($mod_arch['Exam'] !== null) ? (float)$mod_arch['Exam'] : null;
+                $a_moy = null;
+                if ($a_td !== null || $a_tp !== null || $a_ex !== null) {
+                    $exv = ($a_ex !== null) ? $a_ex : 0;
+                    if ($a_td !== null && $a_tp !== null) { $a_moy = $a_tp * 0.2 + $a_td * 0.2 + $exv * 0.6; }
+                    elseif ($a_tp !== null)               { $a_moy = $a_tp * 0.4 + $exv * 0.6; }
+                    elseif ($a_td !== null)               { $a_moy = $a_td * 0.4 + $exv * 0.6; }
+                    else                                  { $a_moy = $exv; }
+                }
+                $stmt_arch->execute([$id_user, $annee_academique, $mod_arch['id_mod'], $mod_arch['Nom_mod'],
+                                     $mod_arch['semestre'], $mod_arch['coefficient'], $a_td, $a_tp, $a_ex, $a_moy]);
+            }
         }
         $message = "Les moyennes, la moyenne finale et les décisions ont été calculées et enregistrées avec succès !";
     }
