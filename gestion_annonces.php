@@ -7,8 +7,12 @@ if (!isset($_SESSION['id_user']) || ($_SESSION['role'] ?? '') !== 'scolarite') {
 }
 
 $message = $error = '';
-$cibles = ['tous' => 'Tous', 'etudiants' => 'Étudiants', 'profs' => 'Professeurs'];
+// La scolarité peut écrire à tout le monde, y compris à elle-même
+$cibles = ['tous' => 'Tous', 'etudiants' => 'Étudiants', 'profs' => 'Professeurs', 'scolarite' => 'Scolarité'];
+$vue  = (($_GET['vue'] ?? 'recues') === 'gestion') ? 'gestion' : 'recues';   // par défaut : annonces reçues
 $edit = null;
+$annonces = $recues = $sections = [];
+$search = trim($_GET['search'] ?? '');
 
 try {
     $pdo = new PDO("mysql:host=localhost;dbname=smart_campus;charset=utf8mb4", 'root', '');
@@ -20,7 +24,7 @@ try {
         $det   = trim($_POST['det'] ?? '');
         $cible = $_POST['cible'] ?? 'tous';
         $id_sec = ($_POST['id_sec'] ?? '') === '' ? null : (int)$_POST['id_sec'];
-        if ($cible === 'profs') { $id_sec = null; } // une annonce « profs » n'a pas de section
+        if ($cible !== 'etudiants') { $id_sec = null; } // la section n'a de sens que pour les étudiants
 
         if ($titre === '' || $det === '') {
             $error = "Le titre et le contenu sont obligatoires.";
@@ -33,43 +37,48 @@ try {
             $st->execute([$_SESSION['id_user'], $titre, $det, $cible, $id_sec]);
             $message = "Annonce publiée avec succès.";
         } else {
-            // On ne modifie que ses propres annonces
             $st = $pdo->prepare("UPDATE annonce SET titre = ?, det = ?, cible = ?, id_Sec = ? WHERE id_Anm = ? AND id_user = ?");
             $st->execute([$titre, $det, $cible, $id_sec, (int)$_POST['id_anm'], $_SESSION['id_user']]);
             $message = "Annonce modifiée avec succès.";
         }
     }
 
-    // ---- Suppression (modération : toute annonce) ----
+    // ---- Suppression (uniquement ses propres annonces) ----
     if (isset($_POST['supprimer_annonce'])) {
-        $st = $pdo->prepare("DELETE FROM annonce WHERE id_Anm = ?");
-        $st->execute([(int)$_POST['id_anm_to_delete']]);
+        $st = $pdo->prepare("DELETE FROM annonce WHERE id_Anm = ? AND id_user = ?");
+        $st->execute([(int)$_POST['id_anm_to_delete'], $_SESSION['id_user']]);
         $message = "Annonce supprimée.";
     }
 
-    // ---- Mode édition : pré-remplir le formulaire ----
-    if (isset($_GET['edit'])) {
-        $st = $pdo->prepare("SELECT * FROM annonce WHERE id_Anm = ? AND id_user = ?");
-        $st->execute([(int)$_GET['edit'], $_SESSION['id_user']]);
-        $edit = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+    if ($vue === 'gestion') {
+        // Mode édition : pré-remplir le formulaire
+        if (isset($_GET['edit'])) {
+            $st = $pdo->prepare("SELECT * FROM annonce WHERE id_Anm = ? AND id_user = ?");
+            $st->execute([(int)$_GET['edit'], $_SESSION['id_user']]);
+            $edit = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+        $sections = $pdo->query("SELECT id_Sec, nom_sec FROM section ORDER BY nom_sec")->fetchAll(PDO::FETCH_ASSOC);
+
+        // Mes annonces envoyées (+ recherche par titre)
+        $st = $pdo->prepare("SELECT a.id_Anm, a.titre, a.det, a.Date_Pub, a.cible, s.nom_sec
+                             FROM annonce a
+                             LEFT JOIN section s ON s.id_Sec = a.id_Sec
+                             WHERE a.id_user = ? AND a.titre LIKE ?
+                             ORDER BY a.Date_Pub DESC, a.id_Anm DESC");
+        $st->execute([$_SESSION['id_user'], '%' . $search . '%']);
+        $annonces = $st->fetchAll(PDO::FETCH_ASSOC);
+    } else {
+        // Annonces reçues : destinées à la scolarité, hors celles que j'ai moi-même écrites
+        $st = $pdo->prepare("SELECT a.titre, a.det, a.Date_Pub, a.image, u.nom, u.prenom, u.role
+                             FROM annonce a
+                             LEFT JOIN user u ON u.id_user = a.id_user
+                             WHERE a.cible IN ('tous','scolarite') AND (a.id_user IS NULL OR a.id_user <> ?)
+                             ORDER BY a.Date_Pub DESC, a.id_Anm DESC");
+        $st->execute([$_SESSION['id_user']]);
+        $recues = $st->fetchAll(PDO::FETCH_ASSOC);
     }
-
-    $sections = $pdo->query("SELECT id_Sec, nom_sec FROM section ORDER BY nom_sec")->fetchAll(PDO::FETCH_ASSOC);
-
-    // ---- Liste + recherche par titre ----
-    $search = trim($_GET['search'] ?? '');
-    $st = $pdo->prepare("SELECT a.id_Anm, a.id_user, a.titre, a.det, a.Date_Pub, a.cible, s.nom_sec, u.nom, u.prenom, u.role
-                         FROM annonce a
-                         LEFT JOIN user u ON u.id_user = a.id_user
-                         LEFT JOIN section s ON s.id_Sec = a.id_Sec
-                         WHERE a.titre LIKE ?
-                         ORDER BY a.Date_Pub DESC, a.id_Anm DESC");
-    $st->execute(['%' . $search . '%']);
-    $annonces = $st->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = "Erreur lors de l'opération sur la base de données.";
-    $annonces = $sections = [];
-    $search = '';
 }
 ?>
 <!DOCTYPE html>
@@ -476,6 +485,15 @@ try {
         .btn-edit:hover { background:var(--header); }
         .actions { display:flex; gap:8px; align-items:center; }
         .btn-cancel { display:block; text-align:center; margin-top:10px; font-size:13px; color:var(--text-muted); }
+        .tabs { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
+        .tab { padding:10px 18px; border-radius:8px; border:2px solid var(--header); color:var(--header); font-weight:600; font-size:14px; text-decoration:none; background:var(--card); }
+        .tab:hover { background:var(--bg); }
+        .tab.active { background:var(--header); color:var(--on-blue); }
+        .ann { display:flex; gap:14px; border:1px solid var(--border); border-left:6px solid var(--accent); border-radius:10px; padding:14px; margin-bottom:14px; }
+        .ann-icon, .ann-img { width:56px; height:56px; border-radius:8px; flex:none; }
+        .ann-icon { background:var(--accent); color:var(--on-accent); display:flex; align-items:center; justify-content:center; font-size:26px; }
+        .ann-img { object-fit:cover; }
+        .ann h4 { font-size:16px; margin-bottom:4px; } .ann p { font-size:14px; margin-bottom:6px; white-space:pre-line; }
     </style>
 </head>
 <body>
@@ -525,16 +543,47 @@ try {
         </div>
 
         <div class="content-body">
-            <h3 class="section-title">Gestion des annonces</h3>
+            
+
+            <div class="tabs">
+                <a href="gestion_annonces.php?vue=gestion" class="tab <?php echo $vue === 'gestion' ? 'active' : ''; ?>">✍️ Gérer mes annonces</a>
+                <a href="gestion_annonces.php?vue=recues" class="tab <?php echo $vue === 'recues' ? 'active' : ''; ?>">📥 Annonces reçues</a>
+            </div>
 
             <?php if (!empty($message)): ?><div class="alert-success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
             <?php if (!empty($error)): ?><div class="alert-error"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
+<?php if ($vue === 'recues'): ?>
+            <!-- ===== Annonces reçues ===== -->
+            <div class="card">
+                <h3>Annonces reçues</h3>
+                <p class="hint" style="margin-bottom:16px">Annonces envoyées à la scolarité par les professeurs et par les autres agents.</p>
+                <?php if (empty($recues)): ?>
+                    <p style="color: var(--text-muted);">Aucune annonce reçue pour le moment.</p>
+                <?php else: foreach ($recues as $r):
+                    if (($r['role'] ?? '') === 'prof') { $icone = '👨‍🏫'; $exp = 'Enseignant : Pr. ' . $r['nom'] . ' ' . $r['prenom']; }
+                    else { $icone = '🏛️'; $exp = 'Scolarité : ' . ($r['prenom'] ?? '') . ' ' . ($r['nom'] ?? ''); } ?>
+                    <article class="ann">
+                        <?php if (!empty($r['image'])): ?>
+                            <img class="ann-img" src="<?php echo htmlspecialchars($r['image']); ?>" alt="">
+                        <?php else: ?>
+                          <!--  <div class="ann-icon" aria-hidden="true"><?php echo $icone; ?></div> -->
+                        <?php endif; ?>
+                        <div>
+                            <h4><?php echo htmlspecialchars($r['titre']); ?></h4>
+                            <p><?php echo htmlspecialchars($r['det']); ?></p>
+                            <small style="color:var(--text-muted)"><?php echo htmlspecialchars($exp); ?> · Publié le <?php echo date('d/m/Y', strtotime($r['Date_Pub'])); ?></small>
+                        </div>
+                    </article>
+                <?php endforeach; endif; ?>
+            </div>
+
+<?php else: ?>
+            <!-- ===== Gestion de mes annonces ===== -->
             <div class="admin-grid">
-                <!-- Formulaire : publier / modifier -->
                 <div class="card">
                     <h3><?php echo $edit ? "Modifier l'annonce" : "Publier une annonce"; ?></h3>
-                    <form action="gestion_annonces.php" method="POST">
+                    <form action="gestion_annonces.php?vue=gestion" method="POST">
                         <?php if ($edit): ?><input type="hidden" name="id_anm" value="<?php echo (int)$edit['id_Anm']; ?>"><?php endif; ?>
                         <div class="form-group">
                             <label for="titre">Titre</label>
@@ -548,7 +597,7 @@ try {
                             <label for="cible">Destinataires</label>
                             <select id="cible" name="cible" onchange="majSection()">
                                 <?php foreach ($cibles as $k => $l): ?>
-                                    <option value="<?php echo $k; ?>" <?php echo (($edit['cible'] ?? 'tous') === $k) ? 'selected' : ''; ?>><?php echo $l; ?></option>
+                                    <option value="<?php echo $k; ?>" <?php echo (($edit['cible'] ?? 'tous') === $k) ? 'selected' : ''; ?>><?php echo htmlspecialchars($l); ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
@@ -556,50 +605,44 @@ try {
                             <label for="id_sec">Section concernée</label>
                             <select id="id_sec" name="id_sec">
                                 <option value="">Toutes les sections</option>
-                                <?php foreach ($sections as $s): ?>
-                                    <option value="<?php echo (int)$s['id_Sec']; ?>" <?php echo ((string)($edit['id_Sec'] ?? '') === (string)$s['id_Sec']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($s['nom_sec']); ?></option>
+                                <?php foreach ($sections as $sc): ?>
+                                    <option value="<?php echo (int)$sc['id_Sec']; ?>" <?php echo ((string)($edit['id_Sec'] ?? '') === (string)$sc['id_Sec']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($sc['nom_sec']); ?></option>
                                 <?php endforeach; ?>
                             </select>
-                            <div class="hint">Laissez « Toutes les sections » pour une annonce générale.</div>
+                            <div class="hint">Laissez « Toutes les sections » pour une annonce destinée à tous les étudiants.</div>
                         </div>
                         <button type="submit" name="<?php echo $edit ? 'modifier_annonce' : 'ajouter_annonce'; ?>" class="btn-submit">
                             <?php echo $edit ? "Enregistrer les modifications" : "Publier l'annonce"; ?>
                         </button>
-                        <?php if ($edit): ?><a href="gestion_annonces.php" class="btn-cancel">Annuler la modification</a><?php endif; ?>
+                        <?php if ($edit): ?><a href="gestion_annonces.php?vue=gestion" class="btn-cancel">Annuler la modification</a><?php endif; ?>
                     </form>
                 </div>
 
-                <!-- Liste -->
                 <div class="card">
-                    <h3>Annonces publiées</h3>
+                    <h3>Mes annonces publiées</h3>
                     <form action="gestion_annonces.php" method="GET" class="search-form">
+                        <input type="hidden" name="vue" value="gestion">
                         <input type="text" name="search" placeholder="Rechercher par titre..." value="<?php echo htmlspecialchars($search); ?>">
                         <button type="submit" class="btn-search">Rechercher</button>
-                        <?php if (!empty($search)): ?><a href="gestion_annonces.php" class="btn-reset">Réinitialiser</a><?php endif; ?>
+                        <?php if (!empty($search)): ?><a href="gestion_annonces.php?vue=gestion" class="btn-reset">Réinitialiser</a><?php endif; ?>
                     </form>
-
                     <?php if (empty($annonces)): ?>
-                        <p style="color: var(--text-muted);">Aucune annonce trouvée.</p>
+                        <p style="color: var(--text-muted);">Vous n'avez publié aucune annonce.</p>
                     <?php else: ?>
                         <div style="overflow-x: auto;">
                             <table>
-                                <thead><tr><th>Date</th><th>Annonce</th><th>Auteur</th><th>Pour</th><th>Action</th></tr></thead>
+                                <thead><tr><th>Date</th><th>Annonce</th><th>Pour</th><th>Action</th></tr></thead>
                                 <tbody>
                                 <?php foreach ($annonces as $a):
-                                    $auteur = ($a['role'] ?? '') === 'prof' ? 'Pr. ' . $a['nom'] . ' ' . $a['prenom']
-                                            : (($a['role'] ?? '') === 'scolarite' ? 'Scolarité (' . $a['prenom'] . ')' : '—');
                                     $pour = $cibles[$a['cible']] . ($a['nom_sec'] ? ' · ' . $a['nom_sec'] : ''); ?>
                                     <tr>
                                         <td><?php echo date('d/m/Y', strtotime($a['Date_Pub'])); ?></td>
                                         <td><strong><?php echo htmlspecialchars($a['titre']); ?></strong><br>
                                             <span style="font-size:12px;color:var(--text-muted)"><?php echo htmlspecialchars(mb_strimwidth($a['det'], 0, 70, '…')); ?></span></td>
-                                        <td><?php echo htmlspecialchars($auteur); ?></td>
                                         <td><span class="badge"><?php echo htmlspecialchars($pour); ?></span></td>
                                         <td><div class="actions">
-                                            <?php if ($a['id_user'] === $_SESSION['id_user']): ?>
-                                                <a href="gestion_annonces.php?edit=<?php echo (int)$a['id_Anm']; ?>" class="btn-edit">Modifier</a>
-                                            <?php endif; ?>
-                                            <form action="gestion_annonces.php" method="POST" onsubmit="return confirm('Voulez-vous vraiment supprimer cette annonce ?');">
+                                            <a href="gestion_annonces.php?vue=gestion&edit=<?php echo (int)$a['id_Anm']; ?>" class="btn-edit">Modifier</a>
+                                            <form action="gestion_annonces.php?vue=gestion" method="POST" onsubmit="return confirm('Voulez-vous vraiment supprimer cette annonce ?');">
                                                 <input type="hidden" name="id_anm_to_delete" value="<?php echo (int)$a['id_Anm']; ?>">
                                                 <button type="submit" name="supprimer_annonce" class="btn-delete">Supprimer</button>
                                             </form>
@@ -612,6 +655,7 @@ try {
                     <?php endif; ?>
                 </div>
             </div>
+<?php endif; ?>
         </div>
     </div>
 
@@ -626,8 +670,8 @@ try {
         }
         // Une annonce destinée aux profs n'a pas de section
         function majSection() {
-            var profs = document.getElementById('cible').value === 'profs';
-            document.getElementById('blocSection').style.display = profs ? 'none' : 'block';
+            var c = document.getElementById('cible'); if (!c) return;
+            document.getElementById('blocSection').style.display = (c.value === 'etudiants') ? 'block' : 'none';
         }
         majSection();
     </script>
