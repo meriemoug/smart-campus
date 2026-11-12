@@ -29,7 +29,7 @@ SET time_zone = "+00:00";
 
 CREATE TABLE `annonce` (
   `id_Anm` int(11) NOT NULL,
-  `id_sco` int(11) DEFAULT NULL,
+  `id_user` int(11) DEFAULT NULL,
   `titre` varchar(150) NOT NULL,
   `det` text NOT NULL,
   `Date_Pub` date NOT NULL,
@@ -718,7 +718,7 @@ ALTER TABLE `specialite`
 -- Constraints for table `annonce`
 --
 ALTER TABLE `annonce`
-  ADD CONSTRAINT `annonce_ibfk_1` FOREIGN KEY (`id_sco`) REFERENCES `scolarite` (`id_sco`) ON DELETE CASCADE,
+  ADD CONSTRAINT `annonce_ibfk_1` FOREIGN KEY (`id_user`) REFERENCES `user` (`id_user`) ON DELETE CASCADE,
   ADD CONSTRAINT `annonce_ibfk_2` FOREIGN KEY (`id_Sec`) REFERENCES `section` (`id_Sec`) ON DELETE CASCADE;
 
 --

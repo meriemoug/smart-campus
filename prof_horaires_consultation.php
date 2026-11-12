@@ -211,10 +211,7 @@ try {
             </div>
         </div>
 
-        <div class="user-info">
-            <span>👨‍🏫 <?php echo htmlspecialchars($prenom_prof . ' ' . $nom_prof); ?></span>
-            <a href="logout.php" class="btn-logout">Déconnexion</a>
-        </div>
+        
     </div>
 
     <!-- Main Content -->
