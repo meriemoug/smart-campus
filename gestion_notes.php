@@ -322,7 +322,7 @@ try {
     <!-- Main Content -->
     <div class="main-content">
         <div class="top-navbar">
-            <h2>Notes et Moyennes</h2>
+            <h2>Espace Scolarité - Notes et Moyennes</h2>
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
                     <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] ?? 'Admin'); ?></strong></span>

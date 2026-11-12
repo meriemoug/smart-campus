@@ -498,27 +498,34 @@ try {
 </head>
 <body>
 
-    <div class="sidebar">
+   <div class="sidebar">
         <div class="sidebar-top">
-            <div class="logo-area"><span>🛡️ Smart Campus (Admin)</span></div>
+            <div class="logo-area">
+                <span>🎓 Smart Campus</span>
+            </div>
             <div class="menu">
-                <a href="admin_principal_dashboard.php" class="menu-item">👥 Agents de scolarité</a>
+                <?php if (!empty($_SESSION['is_super_admin'])): ?>
+                    <a href="admin_principal_dashboard.php" class="menu-item">👥 Agents de scolarité</a>
+                <?php endif; ?>
                 <a href="gestion_profs.php" class="menu-item">👨‍🏫 Professeurs</a>
-                <a href="gestion_etudiants.php" class="menu-item">🎓 Étudiants</a>
+                <a href="gestion_etudiants.php" class="menu-item ">🎓 Étudiants</a>
                 <a href="gestion_sections.php" class="menu-item">🏢 Sections</a>
                 <a href="gestion_specialites.php" class="menu-item">📚 Spécialités & Départements</a>
                 <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
                 <div class="menu-dropdown">
-                    <a href="javascript:void(0);" class="menu-item dropdown-toggle active" onclick="toggleSubmenu()">
-                        <span>📢 Notes, Absences & Annonces</span>
-                        <span id="arrow" style="font-size: 11px;">▴</span>
+                    <!-- Le lien principal qui déclenche l'affichage au clic -->
+                    <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
+                        <span>📢 Notes, Absences & Annonces</span> 
+                        <span id="arrow" style="font-size: 11px;">▾</span>
                     </a>
-                    <div class="submenu" id="submenuNotes" style="display: flex;">
+                    
+                    <!-- Le sous-menu masqué par défaut grâce à l'attribut style="display: none;" -->
+                    <div class="submenu" id="submenuNotes" style="display: none;">
                         <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
-                        <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
+                        <a href="gestion_absences.php" class="submenu-item ">🚫 Absences</a>
                         <a href="gestion_annonces.php" class="submenu-item active">📢 Annonces</a>
                     </div>
-                </div>
+                </div> 
             </div>
         </div>
     </div>
