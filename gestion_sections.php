@@ -265,10 +265,17 @@ try {
         .edt-table th, .edt-table td { border: 1px solid var(--border); text-align: center; vertical-align: top; padding: 8px; font-size: 12px; }
         .edt-cell { cursor: pointer; min-height: 70px; background-color: #fafbfc; transition: background 0.2s; }
         .edt-cell:hover { background-color: #f0f7ff; }
-        .seance-card { background: var(--header); color: #fff; padding: 6px; border-radius: 4px; margin-bottom: 4px; text-align: left; font-size: 11px; }
-        .seance-card.cours { background-color: #1B5A80; }
-        .seance-card.TD { background-color: #2e7d32; }
-        .seance-card.TP { background-color: #c67c00; }
+        .seance-card { border-left: 5px solid #1B5A80; background: #eef5f9; color: var(--text); border-radius: 6px; padding: 7px 8px; margin-bottom: 6px; text-align: left; font-size: 13px; line-height: 1.5; }
+        .seance-card.TD { border-color: #2e7d32; background: #eef7ee; }
+        .seance-card.TP { border-color: #8a5300; background: #fbf1e3; }
+        .seance-card strong { display: block; font-size: 13px; }
+        .type-pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; color: #fff; background: #1B5A80; margin-bottom: 3px; }
+        .type-pill.TD { background: #2e7d32; }
+        .type-pill.TP { background: #8a5300; }
+        .seance-card { position: relative; padding-right: 34px; }
+        .seance-card form { position: absolute; top: 6px; right: 6px; margin: 0; }
+        .btn-del-x { background: transparent; color: var(--error); border: none; width: 24px; height: 24px; border-radius: 50%; font-size: 14px; font-weight: 700; line-height: 1; cursor: pointer; }
+        .btn-del-x:hover { background: var(--error); color: var(--on-error); }
 
         #modalSeance { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
         .modal-content { background: white; padding: 25px; border-radius: 10px; width: 450px; max-width: 90%; }
@@ -573,16 +580,14 @@ try {
                                                 if (isset($seances_grid[$j][$horaire_str])) {
                                                     foreach ($seances_grid[$j][$horaire_str] as $s) {
                                                         echo '<div class="seance-card ' . htmlspecialchars($s['type_seance']) . '">';
-                                                        echo '<strong>' . htmlspecialchars($s['Nom_mod']) . '</strong> (' . htmlspecialchars(strtoupper($s['type_seance'])) . ')<br>';
+                                                        echo '<span class="type-pill ' . htmlspecialchars($s['type_seance']) . '">' . htmlspecialchars(strtoupper($s['type_seance'])) . ($s['id_groupe'] ? ' · G' . (int)$s['id_groupe'] : '') . '</span>';
+                                                        echo '<strong>' . htmlspecialchars($s['Nom_mod']) . '</strong>';
                                                         echo '🏛️ ' . htmlspecialchars($s['nom_salle']) . '<br>';
                                                         echo '👨‍🏫 ' . htmlspecialchars($s['prof_nom'] . ' ' . $s['prof_prenom']);
-                                                        if ($s['id_groupe']) {
-                                                            echo '<br>👥 Groupe ' . htmlspecialchars($s['id_groupe']);
-                                                        }
-                                                        echo '<form method="POST" action="gestion_sections.php?id_sec_selected=' . $selected_section['id_Sec'] . '" style="text-align:right; margin-top:3px;">
-                                                                <input type="hidden" name="id_Seance_to_delete" value="' . $s['id_Seance'] . '">
-                                                                <button type="submit" name="supprimer_seance" class="btn-delete" onclick="event.stopPropagation(); return confirm(\'Supprimer cette séance ?\');">❌ Supprimer</button>
-                                                              </form>';
+                                                        echo '<form method="POST" action="gestion_sections.php?id_sec_selected=' . $selected_section['id_Sec'] . '">
+                                                        <input type="hidden" name="id_Seance_to_delete" value="' . $s['id_Seance'] . '">
+                                                        <button type="submit" name="supprimer_seance" class="btn-del-x" title="Supprimer cette séance" aria-label="Supprimer cette séance" onclick="event.stopPropagation(); return confirm(\'Supprimer cette séance ?\');">✕</button>
+                                                        </form>';
                                                         echo '</div>';
                                                     }
                                                 }
