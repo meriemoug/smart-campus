@@ -23,11 +23,20 @@ try {
     $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // 1. Récupérer toutes les spécialités pour le premier sélecteur
+    // 1. Récupérer toutes les spécialités
     $stmt_specs = $pdo->query("SELECT id_sp, NomSp, annee FROM specialite ORDER BY NomSp ASC");
     $specialites = $stmt_specs->fetchAll(PDO::FETCH_ASSOC);
 
-    // 2. Récupérer les sections en fonction de la spécialité sélectionnée (pour alimenter le second sélecteur)
+    // Récupérer toutes les sections (avec leurs spécialités) pour le menu d'orientation globale
+    $stmt_all_secs = $pdo->query("
+        SELECT sec.id_Sec, sec.nom_sec, sp.NomSp, sp.annee 
+        FROM section sec 
+        LEFT JOIN specialite sp ON sec.id_sp = sp.id_sp 
+        ORDER BY sec.nom_sec ASC
+    ");
+    $toutes_sections = $stmt_all_secs->fetchAll(PDO::FETCH_ASSOC);
+
+    // 2. Récupérer les sections en fonction de la spécialité sélectionnée pour le filtre principal
     $sections = [];
     if (!empty($selected_specialite)) {
         $stmt_secs = $pdo->prepare("SELECT id_Sec, nom_sec FROM section WHERE id_sp = ? ORDER BY nom_sec ASC");
@@ -35,7 +44,7 @@ try {
         $sections = $stmt_secs->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    // Si une section est sélectionnée, récupérer les infos de la section et de la spécialité pour l'affichage
+    // Infos de la section et spécialité courante
     if (!empty($selected_section)) {
         $stmt_sec_info = $pdo->prepare("
             SELECT s.nom_sec, sp.NomSp, sp.annee 
@@ -52,45 +61,97 @@ try {
         }
     }
 
-    // 3. Traitement du calcul & attribution de la décision commune pour la SECTION sélectionnée
+    // 3. Traitement de l'orientation collective des étudiants ADMIS de la section
+    if (isset($_POST['orienter_admis']) && !empty($selected_section)) {
+        $nouvelle_section_cible = $_POST['nouvelle_section_cible'] ?? '';
+
+        if (!empty($nouvelle_section_cible)) {
+            // Récupérer tous les id_user des étudiants de la section courante qui sont 'Admis'
+            $stmt_admis = $pdo->prepare("
+                SELECT e.id_user 
+                FROM etudiant e
+                JOIN resultat_etudiant r ON e.id_user = r.id_user
+                WHERE e.id_Sec = ? AND r.decision = 'Admis'
+            ");
+            $stmt_admis->execute([$selected_section]);
+            $admis_list = $stmt_admis->fetchAll(PDO::FETCH_COLUMN);
+
+            if (!empty($admis_list)) {
+                $placeholders = implode(',', array_fill(0, count($admis_list), '?'));
+                $params = array_merge([$nouvelle_section_cible], $admis_list);
+                
+                // Mettre à jour leur nouvelle section dans la table etudiant
+                $stmt_update_sec = $pdo->prepare("
+                    UPDATE etudiant 
+                    SET id_Sec = ? 
+                    WHERE id_user IN ($placeholders)
+                ");
+                $stmt_update_sec->execute($params);
+                $message = "Tous les étudiants admis de cette section ont été orientés vers la nouvelle section avec succès !";
+            } else {
+                $error = "Aucun étudiant admis trouvé dans cette section à orienter.";
+            }
+        } else {
+            $error = "Veuillez sélectionner une section de destination.";
+        }
+    }
+
+    // 4. Traitement du calcul & attribution des moyennes S1, S2, Finale et de la Décision
     if (isset($_POST['calculer_section']) && !empty($selected_section)) {
         
-        $stmt_etus_sec = $pdo->prepare("SELECT id_user FROM etudiant WHERE id_Sec = ?");
+        $stmt_etus_sec = $pdo->prepare("SELECT id_Etu, id_user FROM etudiant WHERE id_Sec = ?");
         $stmt_etus_sec->execute([$selected_section]);
         $etudiants_section = $stmt_etus_sec->fetchAll(PDO::FETCH_ASSOC);
 
+        // Fonction pour calculer la moyenne d'un semestre (1 pour S1, 2 pour S2)
+        $calculerMoyenneSemestre = function($pdo, $id_etudiant, $semestre_num) {
+            $stmt_notes = $pdo->prepare("
+                SELECT n.Exam, n.TD, n.TP, p.coefficient 
+                FROM note n
+                JOIN programme p ON n.id_Mod = p.id_mod
+                WHERE n.id_Etud = ? AND p.semestre = ?
+            ");
+            $stmt_notes->execute([$id_etudiant, $semestre_num]);
+            $notes_modules = $stmt_notes->fetchAll(PDO::FETCH_ASSOC);
+
+            $points_totaux = 0;
+            $coefficients_totaux = 0;
+
+            foreach ($notes_modules as $mod) {
+                $exam = isset($mod['Exam']) ? floatval($mod['Exam']) : 0;
+                $td   = isset($mod['TD']) ? floatval($mod['TD']) : null;
+                $tp   = isset($mod['TP']) ? floatval($mod['TP']) : null;
+                $coef = floatval($mod['coefficient']);
+
+                $moy_module = 0;
+
+                // Application de la règle métier
+                if ($tp !== null && $td !== null) {
+                    $moy_module = ($tp * 0.2) + ($td * 0.2) + ($exam * 0.6); 
+                } elseif ($tp !== null) {
+                    $moy_module = ($tp * 0.4) + ($exam * 0.6);
+                } elseif ($td !== null) {
+                    $moy_module = ($td * 0.4) + ($exam * 0.6);
+                } else {
+                    $moy_module = $exam;
+                }
+
+                $points_totaux += ($moy_module * $coef);
+                $coefficients_totaux += $coef;
+            }
+
+            return ($coefficients_totaux > 0) ? ($points_totaux / $coefficients_totaux) : null;
+        };
+
         foreach ($etudiants_section as $etu) {
+            $id_etudiant = $etu['id_Etu'];
             $id_user = $etu['id_user'];
 
-            // --- Calcul S1 ---
-            $stmt_notes_s1 = $pdo->prepare("
-                SELECT n.valeur_note, en.coefficient 
-                FROM note n 
-                JOIN enseignement en ON n.id_enseignement = en.id_enseignement 
-                WHERE n.id_user = ? AND n.semestre = 'S1'
-            ");
-            $stmt_notes_s1->execute([$id_user]);
-            $notes_s1 = $stmt_notes_s1->fetchAll(PDO::FETCH_ASSOC);
+            // Calculs S1 (1) et S2 (2)
+            $moyenne_s1 = $calculerMoyenneSemestre($pdo, $id_etudiant, 1);
+            $moyenne_s2 = $calculerMoyenneSemestre($pdo, $id_etudiant, 2);
 
-            $p_s1 = 0; $c_s1 = 0;
-            foreach ($notes_s1 as $n) { $p_s1 += ($n['valeur_note'] * $n['coefficient']); $c_s1 += $n['coefficient']; }
-            $moyenne_s1 = ($c_s1 > 0) ? ($p_s1 / $c_s1) : null;
-
-            // --- Calcul S2 ---
-            $stmt_notes_s2 = $pdo->prepare("
-                SELECT n.valeur_note, en.coefficient 
-                FROM note n 
-                JOIN enseignement en ON n.id_enseignement = en.id_enseignement 
-                WHERE n.id_user = ? AND n.semestre = 'S2'
-            ");
-            $stmt_notes_s2->execute([$id_user]);
-            $notes_s2 = $stmt_notes_s2->fetchAll(PDO::FETCH_ASSOC);
-
-            $p_s2 = 0; $c_s2 = 0;
-            foreach ($notes_s2 as $n) { $p_s2 += ($n['valeur_note'] * $n['coefficient']); $c_s2 += $n['coefficient']; }
-            $moyenne_s2 = ($c_s2 > 0) ? ($p_s2 / $c_s2) : null;
-
-            // --- Moyenne Finale & Décision ---
+            // Calcul de la moyenne finale
             $moyenne_finale = null;
             $decision = 'En cours';
 
@@ -99,9 +160,11 @@ try {
                 $decision = ($moyenne_finale >= 10) ? 'Admis' : 'Ajourné';
             } elseif ($moyenne_s1 !== null) {
                 $moyenne_finale = $moyenne_s1;
+            } elseif ($moyenne_s2 !== null) {
+                $moyenne_finale = $moyenne_s2;
             }
 
-            // --- Enregistrement dans resultat_etudiant ---
+            // Enregistrement dans resultat_etudiant
             $stmt_check = $pdo->prepare("SELECT id_resultat FROM resultat_etudiant WHERE id_user = ?");
             $stmt_check->execute([$id_user]);
 
@@ -113,10 +176,10 @@ try {
                 $stmt_ins->execute([$id_user, $moyenne_s1, $moyenne_s2, $moyenne_finale, $decision]);
             }
         }
-        $message = "Les moyennes et décisions de la section ont été validées et mises à jour !";
+        $message = "Les moyennes de S1, S2, la moyenne finale et les décisions ont été calculées avec succès !";
     }
 
-    // 4. Récupérer les étudiants et résultats de la section sélectionnée
+    // 5. Récupérer les résultats pour l'affichage du tableau (sans les colonnes superflues)
     if (!empty($selected_section)) {
         $stmt_resultats = $pdo->prepare("
             SELECT e.id_user, u.nom, u.prenom, e.annee, e.groupe, r.moyenne_s1, r.moyenne_s2, r.moyenne_finale, r.decision
@@ -139,7 +202,7 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Campus - Notes & Moyennes par Spécialité et Section</title>
+    <title>Smart Campus - Notes & Moyennes</title>
     <style>
         :root {
             --header: #1B5A80;
@@ -168,7 +231,7 @@ try {
 
         .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
         .top-navbar { background-color: var(--header); color: var(--on-blue); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
-        .content-body { padding: 30px; max-width: 1100px; margin: 0 auto; width: 100%; }
+        .content-body { padding: 30px; max-width: 1200px; margin: 0 auto; width: 100%; }
 
         .card { background-color: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 25px; box-shadow: 0 4px 12px rgba(27,90,128,0.04); margin-bottom: 25px; }
         .section-title { color: var(--header); font-size: 20px; margin-bottom: 15px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
@@ -182,6 +245,7 @@ try {
         .btn-submit:hover { background-color: var(--menu); }
 
         .btn-calcul { background-color: var(--accent); color: var(--on-accent); border: none; padding: 10px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .btn-orient { background-color: var(--header); color: white; border: none; padding: 8px 15px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
 
         table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
         th, td { padding: 12px 15px; text-align: left; font-size: 14px; border-bottom: 1px solid #eee; }
@@ -190,9 +254,6 @@ try {
         .badge-admis { background-color: var(--success-bg); color: var(--success-text); padding: 5px 10px; border-radius: 4px; font-weight: 600; font-size: 12px; }
         .badge-ajourne { background-color: var(--danger-bg); color: var(--danger-text); padding: 5px 10px; border-radius: 4px; font-weight: 600; font-size: 12px; }
         .badge-cours { background-color: #fff3cd; color: #856404; padding: 5px 10px; border-radius: 4px; font-weight: 600; font-size: 12px; }
-
-        .alert-success { background-color: var(--success-bg); color: var(--success-text); padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
-        .alert-error { background-color: var(--danger-bg); color: var(--danger-text); padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #f5c6cb; }
 
         .menu-dropdown { position: relative; }
         .dropdown-toggle { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
@@ -220,22 +281,14 @@ try {
             padding: 15px;
             color: var(--text);
         }
-        .btn-logout { background-color: var(--error); color: var(--on-error); padding: 10px; border-radius: 8px; text-align: center; text-decoration: none; font-weight: 600; }
-
         .user-dropdown.active { display: block; }
         .dropdown-header { font-weight: bold; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
         .dropdown-item { display: block; width: 100%; padding: 8px 10px; text-align: left; background: none; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; color: var(--text); margin-bottom: 5px; }
         .dropdown-item:hover { background-color: var(--bg); }
-        .dropdown-item.logout { background-color: var(--error); color: var(--on-error); text-align: center; }
-        .dropdown-item.logout:hover { opacity: 0.9; }
+        .dropdown-item.logout { background-color: #dc2626; color: white; text-align: center; }
 
-
-
-        .btn-submit { background-color: var(--header); color: var(--on-blue); border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; transition: background 0.2s; }
-        .btn-submit:hover { background-color: var(--menu); }
-        .btn-edit { background-color: var(--menu); color: var(--on-blue); padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 600; text-decoration: none; display: inline-block; }
-        .btn-delete { background-color: var(--error); color: var(--on-error); border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; }
-
+        .alert-success { background-color: var(--success-bg); color: var(--success-text); padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
+        .alert-error { background-color: var(--danger-bg); color: var(--danger-text); padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #f5c6cb; }
     </style>
 </head>
 <body>
@@ -245,9 +298,6 @@ try {
         <div class="sidebar-top">
             <div class="logo-area"><span>🎓 Smart Campus</span></div>
             <div class="menu">
-                <?php if (!empty($_SESSION['is_super_admin'])): ?>
-                    <a href="admin_principal_dashboard.php" class="menu-item">👥 Agents de scolarité</a>
-                <?php endif; ?>
                 <a href="gestion_profs.php" class="menu-item">👨‍🏫 Professeurs</a>
                 <a href="gestion_etudiants.php" class="menu-item">🎓 Étudiants</a>
                 <a href="gestion_sections.php" class="menu-item">🏢 Sections</a>
@@ -259,7 +309,7 @@ try {
                         <span>📢 Notes, Absences & Annonces</span> 
                         <span id="arrow" style="font-size: 11px;">▾</span>
                     </a>
-                    <div class="submenu" id="submenuNotes">
+                    <div class="submenu" id="submenuNotes" style="display: flex;">
                         <a href="gestion_notes.php" class="submenu-item active">📊 Notes & Moyennes</a>
                         <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
                         <a href="gestion_annonces.php" class="submenu-item">📢 Annonces</a>
@@ -275,8 +325,8 @@ try {
             <h2>Notes et Moyennes</h2>
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
-                    <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
-                    <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
+                    <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] ?? 'Admin'); ?></strong></span>
+                    <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'] ?? 'A', 0, 1)); ?></div>
                 </div>
 
                 <div id="userDropdown" class="user-dropdown">
@@ -284,7 +334,6 @@ try {
                         Connecté en tant que<br>
                         <span style="color: var(--menu);"><?php echo htmlspecialchars($_SESSION['email'] ?? 'Scolarité'); ?></span>
                     </div>
-                    <a href="modifier_infos.php" class="dropdown-item">✏️ Modifier mes informations</a>
                     <a href="logout.php" class="dropdown-item logout">Se déconnecter</a>
                 </div>
             </div>
@@ -300,12 +349,10 @@ try {
                 <div class="alert-error"><?php echo htmlspecialchars($error); ?></div>
             <?php endif; ?>
 
-            <!-- 1. Choix de la Spécialité puis de la Section -->
+            <!-- 1. Formulaire de filtre -->
             <div class="card">
                 <h3 class="section-title">Filtrer par Spécialité et Section</h3>
                 <form action="gestion_notes.php" method="GET" class="form-inline">
-                    
-                    <!-- Sélecteur Spécialité -->
                     <div class="form-group">
                         <label for="id_sp">Spécialité & Année :</label>
                         <select name="id_sp" id="id_sp" onchange="this.form.submit()" required>
@@ -318,7 +365,6 @@ try {
                         </select>
                     </div>
 
-                    <!-- Sélecteur Section (filtré selon la spécialité choisie) -->
                     <div class="form-group">
                         <label for="id_section">Section académique :</label>
                         <select name="id_section" id="id_section" <?php echo empty($selected_specialite) ? 'disabled' : ''; ?> required>
@@ -335,17 +381,37 @@ try {
                 </form>
             </div>
 
-            <!-- 2. Résultat & Calcul de la décision pour cette section -->
+            <!-- 2. Tableau des résultats, délibération et orientation collective -->
             <?php if (!empty($selected_section)): ?>
                 <div class="card">
-                    <div class="section-title">
+                    <div class="section-title" style="margin-bottom: 20px;">
                         <div>
                             <span>Section : <strong><?php echo htmlspecialchars($nom_section); ?></strong></span>
                             <span class="section-info-badge">Spécialité : <?php echo htmlspecialchars($nom_specialite); ?></span>
                         </div>
-                        <form action="gestion_notes.php?id_sp=<?php echo urlencode($selected_specialite); ?>&id_section=<?php echo urlencode($selected_section); ?>" method="POST">
+                        <form action="gestion_notes.php?id_sp=<?php echo urlencode($selected_specialite); ?>&id_section=<?php echo urlencode($selected_section); ?>" method="POST" style="display:inline;">
                             <input type="hidden" name="id_section" value="<?php echo htmlspecialchars($selected_section); ?>">
-                            <button type="submit" name="calculer_section" class="btn-calcul">⚙️ Calculer & Délibérer la Section</button>
+                            <button type="submit" name="calculer_section" class="btn-calcul">⚙️ Calculer S1, S2 & Délibérer</button>
+                        </form>
+                    </div>
+
+                    <!-- Bloc d'orientation collective pour les étudiants Admis -->
+                    <div style="background: #fdf8e2; border: 1px solid var(--border); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <h4 style="color: var(--header); margin-bottom: 10px; font-size: 15px;">🚀 Orientation collective des étudiants ADMIS</h4>
+                        <form action="gestion_notes.php?id_sp=<?php echo urlencode($selected_specialite); ?>&id_section=<?php echo urlencode($selected_section); ?>" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+                            <input type="hidden" name="id_section" value="<?php echo htmlspecialchars($selected_section); ?>">
+                            <div style="flex: 1; min-width: 300px;">
+                                <label for="nouvelle_section_cible" style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px;">Sélectionner la nouvelle section d'affectation pour les Admis :</label>
+                                <select name="nouvelle_section_cible" id="nouvelle_section_cible" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background: #fff;" required>
+                                    <option value="">-- Choisir la section de destination --</option>
+                                    <?php foreach ($toutes_sections as $sec): ?>
+                                        <option value="<?php echo $sec['id_Sec']; ?>">
+                                            <?php echo htmlspecialchars($sec['nom_sec'] . ' — ' . $sec['NomSp'] . ' (' . $sec['annee'] . ')'); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <button type="submit" name="orienter_admis" class="btn-orient" onclick="return confirm('Confirmez-vous l\'affectation de tous les étudiants admis de cette section vers la nouvelle section ?');">Valider l'orientation collective</button>
                         </form>
                     </div>
 
@@ -358,7 +424,7 @@ try {
                                 <th>Moy. S1</th>
                                 <th>Moy. S2</th>
                                 <th>Moyenne Finale</th>
-                                <th>Décision Commune</th>
+                                <th>Décision</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -366,8 +432,8 @@ try {
                                 <?php foreach ($etudiants as $res): ?>
                                     <tr>
                                         <td><?php echo htmlspecialchars($res['id_user']); ?></td>
-                                        <td><?php echo htmlspecialchars($res['nom'] . ' ' . $res['prenom']); ?></td>
-                                        <td>Gr. <?php echo htmlspecialchars($res['groupe']); ?></td>
+                                        <td><strong><?php echo htmlspecialchars($res['nom'] . ' ' . $res['prenom']); ?></strong></td>
+                                        <td>Gr. <?php echo htmlspecialchars($res['groupe'] ?? 'N/A'); ?></td>
                                         <td><?php echo ($res['moyenne_s1'] !== null) ? number_format($res['moyenne_s1'], 2) : '-'; ?></td>
                                         <td><?php echo ($res['moyenne_s2'] !== null) ? number_format($res['moyenne_s2'], 2) : '-'; ?></td>
                                         <td><strong><?php echo ($res['moyenne_finale'] !== null) ? number_format($res['moyenne_finale'], 2) : '-'; ?></strong></td>
@@ -408,19 +474,18 @@ try {
           }
       }
 
-      // Gestion du menu déroulant de l'avatar utilisateur
-        function toggleUserMenu(event) {
-            event.stopPropagation();
-            var dropdown = document.getElementById('userDropdown');
-            dropdown.classList.toggle('active');
-        }
+      function toggleUserMenu(event) {
+          event.stopPropagation();
+          var dropdown = document.getElementById('userDropdown');
+          dropdown.classList.toggle('active');
+      }
 
-        window.onclick = function(event) {
-            var dropdown = document.getElementById('userDropdown');
-            if (dropdown && dropdown.classList.contains('active')) {
-                dropdown.classList.remove('active');
-            }
-        }
+      window.onclick = function(event) {
+          var dropdown = document.getElementById('userDropdown');
+          if (dropdown && dropdown.classList.contains('active')) {
+              dropdown.classList.remove('active');
+          }
+      }
     </script>
 </body>
 </html>
