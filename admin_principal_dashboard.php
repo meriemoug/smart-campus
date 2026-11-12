@@ -24,7 +24,7 @@ try {
         $id_agent = trim($_POST['id_agent']);
         $nom = trim($_POST['nom']);
         $prenom = trim($_POST['prenom']);
-        $email = trim($_POST['email']?? NULL);
+        $email = trim($_POST['email'] ?? NULL);
         $password = trim($_POST['password']);
         $post_Admin = trim($_POST['post_Admin']);
 
@@ -53,7 +53,48 @@ try {
         }
     }
 
-    // 3. Traitement de la suppression d'un agent
+    // 3. Traitement de la modification d'un agent existant
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_agent'])) {
+        $id_agent_mod = trim($_POST['id_agent_mod']);
+        $nom = trim($_POST['nom']);
+        $prenom = trim($_POST['prenom']);
+        $email = trim($_POST['email']);
+        $post_Admin = trim($_POST['post_Admin']);
+        $nouveau_mdp = trim($_POST['password'] ?? '');
+
+        if (!empty($id_agent_mod) && !empty($nom) && !empty($prenom) && !empty($email)) {
+            // Vérifier si l'email appartient à un autre utilisateur
+            $stmt_check_email = $pdo->prepare("SELECT id_user FROM user WHERE email = ? AND id_user != ?");
+            $stmt_check_email->execute([$email, $id_agent_mod]);
+
+            if ($stmt_check_email->rowCount() > 0) {
+                $error = "Cette adresse email est déjà utilisée par un autre compte.";
+            } else {
+                $pdo->beginTransaction();
+
+                // Mettre à jour la table user (avec ou sans nouveau mot de passe)
+                if (!empty($nouveau_mdp)) {
+                    $hashed_password = password_hash($nouveau_mdp, PASSWORD_DEFAULT);
+                    $stmt_up_user = $pdo->prepare("UPDATE user SET nom = ?, prenom = ?, email = ?, mdP = ? WHERE id_user = ?");
+                    $stmt_up_user->execute([$nom, $prenom, $email, $hashed_password, $id_agent_mod]);
+                } else {
+                    $stmt_up_user = $pdo->prepare("UPDATE user SET nom = ?, prenom = ?, email = ? WHERE id_user = ?");
+                    $stmt_up_user->execute([$nom, $prenom, $email, $id_agent_mod]);
+                }
+
+                // Mettre à jour le poste dans la table scolarite
+                $stmt_up_scol = $pdo->prepare("UPDATE scolarite SET post_Admin = ? WHERE id_user = ?");
+                $stmt_up_scol->execute([$post_Admin, $id_agent_mod]);
+
+                $pdo->commit();
+                $message = "Les informations de l'agent ont été mises à jour avec succès !";
+            }
+        } else {
+            $error = "Veuillez remplir les champs obligatoires pour la modification.";
+        }
+    }
+
+    // 4. Traitement de la suppression d'un agent
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_agent'])) {
         $id_agent_to_delete = trim($_POST['id_agent_to_delete']);
 
@@ -73,7 +114,7 @@ try {
         }
     }
 
-    // 4. Gestion de la recherche par nom ou prénom
+    // 5. Gestion de la recherche par nom ou prénom
     $search = trim($_GET['search'] ?? '');
 
     if (!empty($search)) {
@@ -182,21 +223,6 @@ try {
             font-weight: 600;
         }
 
-        .btn-logout {
-            background-color: var(--error);
-            color: var(--on-error);
-            padding: 10px;
-            border-radius: 8px;
-            text-align: center;
-            text-decoration: none;
-            font-weight: 600;
-            transition: opacity 0.2s;
-        }
-
-        .btn-logout:hover {
-            opacity: 0.9;
-        }
-
         .main-content {
             flex: 1;
             display: flex;
@@ -296,7 +322,6 @@ try {
             box-shadow: 0 0 0 3px rgba(34, 107, 148, 0.15);
         }
 
-        /* Style de la barre de recherche */
         .search-form {
             display: flex;
             gap: 10px;
@@ -310,12 +335,6 @@ try {
             border-radius: 6px;
             font-size: 14px;
             background-color: #FAFCFE;
-        }
-
-        .search-form input:focus {
-            outline: none;
-            border-color: var(--menu);
-            box-shadow: 0 0 0 3px rgba(34, 107, 148, 0.15);
         }
 
         .btn-search {
@@ -344,11 +363,6 @@ try {
             text-decoration: none;
             display: flex;
             align-items: center;
-            transition: background 0.2s;
-        }
-
-        .btn-reset:hover {
-            background-color: #cbd5e1;
         }
 
         .btn-submit {
@@ -368,20 +382,30 @@ try {
             background-color: var(--menu);
         }
 
+        .btn-edit {
+            background-color: var(--menu);
+            color: var(--on-blue);
+            border: none;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-top:10px;
+        }
+
         .btn-delete {
             background-color: var(--error);
             color: var(--on-error);
             border: none;
-            padding: 6px 12px;
+            padding: 6px 10px;
             border-radius: 4px;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
-            transition: opacity 0.2s;
-        }
-
-        .btn-delete:hover {
-            opacity: 0.85;
+            margin-top:10px;
         }
 
         table {
@@ -402,10 +426,6 @@ try {
             font-weight: 600;
         }
 
-        td {
-            color: var(--text);
-        }
-
         .alert-success {
             background-color: #d4edda;
             color: #155724;
@@ -424,12 +444,15 @@ try {
             border: 1px solid #f5c6cb;
         }
 
+        /* Modal de modification */
+        #modalEdit { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: white; padding: 25px; border-radius: 10px; width: 450px; max-width: 90%; }
+
         /* Style du profil utilisateur cliquable */
         .user-menu-container { position: relative; display: inline-block; cursor: pointer; }
         .user-profile { display: flex; align-items: center; gap: 12px; }
         .user-avatar { width: 38px; height: 38px; background-color: var(--accent); color: var(--on-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
         
-        /* Dropdown du profil */
         .user-dropdown {
             display: none;
             position: absolute;
@@ -449,52 +472,17 @@ try {
         .dropdown-item { display: block; width: 100%; padding: 8px 10px; text-align: left; background: none; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; color: var(--text); margin-bottom: 5px; }
         .dropdown-item:hover { background-color: var(--bg); }
         .dropdown-item.logout { background-color: var(--error); color: var(--on-error); text-align: center; }
-        .dropdown-item.logout:hover { opacity: 0.9; }
 
-        .menu-dropdown {
-    position: relative;
-}
-
-.dropdown-toggle {
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-/* Le sous-menu */
-.submenu {
-    flex-direction: column;
-    gap: 4px;
-    padding-left: 15px;
-    margin-top: 4px;
-    margin-bottom: 4px;
-    border-left: 2px solid rgba(255, 255, 255, 0.2);
-}
-
-.submenu-item {
-    color: rgba(255, 255, 255, 0.85);
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 13px;
-    font-weight: 400;
-    transition: background 0.2s, color 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.submenu-item:hover, .submenu-item.active {
-    background-color: var(--accent);
-    color: var(--on-accent);
-    font-weight: 600;
-}
+        .menu-dropdown { position: relative; }
+        .dropdown-toggle { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .submenu { flex-direction: column; gap: 4px; padding-left: 15px; margin-top: 4px; margin-bottom: 4px; border-left: 2px solid rgba(255, 255, 255, 0.2); }
+        .submenu-item { color: rgba(255, 255, 255, 0.85); padding: 8px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+        .submenu-item:hover, .submenu-item.active { background-color: var(--accent); color: var(--on-accent); font-weight: 600; }
     </style>
 </head>
 <body>
 
-    <!-- Sidebar Unifiée (7 Éléments) -->
+    <!-- Sidebar Unifiée -->
     <div class="sidebar">
         <div class="sidebar-top">
             <div class="logo-area">
@@ -508,35 +496,31 @@ try {
                 <a href="gestion_specialites.php" class="menu-item">📚 Spécialités & Départements</a>
                 <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
                 <div class="menu-dropdown">
-                    <!-- Le lien principal qui déclenche l'affichage au clic -->
                     <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
                         <span>📢 Notes, Absences & Annonces</span> 
                         <span id="arrow" style="font-size: 11px;">▾</span>
                     </a>
-                    
-                    <!-- Le sous-menu masqué par défaut grâce à l'attribut style="display: none;" -->
                     <div class="submenu" id="submenuNotes" style="display: none;">
                         <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
                         <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
                         <a href="gestion_annonces.php" class="submenu-item">📢 Annonces</a>
                     </div>
-                </div>           </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <!-- Main Content -->
     <div class="main-content">
         <div class="top-navbar">
-            <h2>Espace Scolarité - Gestion des Sections</h2>
+            <h2>Espace Administration - Gestion des Agents</h2>
             
-            <!-- Profil utilisateur cliquable avec menu déroulant -->
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
                     <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
                     <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
                 </div>
 
-                <!-- Dropdown affiché au clic -->
                 <div id="userDropdown" class="user-dropdown">
                     <div class="dropdown-header">
                         Connecté en tant que<br>
@@ -578,7 +562,7 @@ try {
                         </div>
                         <div class="form-group">
                             <label for="email">Adresse Email</label>
-                            <input type="email" id="email" name="email"  placeholder="agent@usthb.dz">
+                            <input type="email" id="email" name="email" required placeholder="agent@usthb.dz">
                         </div>
                         <div class="form-group">
                             <label for="password">Mot de passe temporaire</label>
@@ -592,11 +576,10 @@ try {
                     </form>
                 </div>
 
-                <!-- Liste des agents avec barre de recherche -->
+                <!-- Liste des agents avec barre de recherche et bouton modifier -->
                 <div class="card">
                     <h3>Agents enregistrés</h3>
 
-                    <!-- Barre de recherche -->
                     <form action="admin_principal_dashboard.php" method="GET" class="search-form">
                         <input type="text" name="search" placeholder="Rechercher par nom ou prénom..." value="<?php echo htmlspecialchars($search); ?>">
                         <button type="submit" class="btn-search">Rechercher</button>
@@ -615,7 +598,7 @@ try {
                                         <th>ID</th>
                                         <th>Nom & Prénom</th>
                                         <th>Poste</th>
-                                        <th>Action</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -624,14 +607,17 @@ try {
                                             <td><strong><?php echo htmlspecialchars($ag['id_user']); ?></strong></td>
                                             <td><?php echo htmlspecialchars($ag['nom'] . ' ' . $ag['prenom']); ?></td>
                                             <td><?php echo htmlspecialchars($ag['post_Admin']); ?></td>
-                                            <td>
+                                            <td style="display: flex; gap: 5px;">
+                                                <!-- Bouton de modification (ouvre le modal avec les données de l'agent) -->
+                                                <button type="button" class="btn-edit" onclick="ouvrirModalEdit('<?php echo $ag['id_user']; ?>', '<?php echo addslashes($ag['nom']); ?>', '<?php echo addslashes($ag['prenom']); ?>', '<?php echo addslashes($ag['email']); ?>', '<?php echo addslashes($ag['post_Admin']); ?>')">
+                                                    Modifier
+                                                </button>
+
                                                 <?php if ($ag['id_user'] !== $_SESSION['id_user']): ?>
                                                     <form action="admin_principal_dashboard.php" method="POST" onsubmit="return confirm('Voulez-vous vraiment supprimer cet agent ?');" style="display:inline;">
                                                         <input type="hidden" name="id_agent_to_delete" value="<?php echo htmlspecialchars($ag['id_user']); ?>">
                                                         <button type="submit" name="supprimer_agent" class="btn-delete">Supprimer</button>
                                                     </form>
-                                                <?php else: ?>
-                                                    <span style="font-size: 12px; color: var(--text-muted); font-style: italic;">Compte Actif</span>
                                                 <?php endif; ?>
                                             </td>
                                         </tr>
@@ -644,15 +630,50 @@ try {
             </div>
         </div>
     </div>
+
+    <!-- Modal de Modification d'un agent -->
+    <div id="modalEdit">
+        <div class="modal-content">
+            <h3 style="margin-bottom: 15px; color: var(--header);">Modifier l'agent</h3>
+            <form action="admin_principal_dashboard.php" method="POST">
+                <input type="hidden" id="edit_id_agent" name="id_agent_mod">
+                
+                <div class="form-group">
+                    <label for="edit_nom">Nom</label>
+                    <input type="text" id="edit_nom" name="nom" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit_prenom">Prénom</label>
+                    <input type="text" id="edit_prenom" name="prenom" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit_email">Adresse Email</label>
+                    <input type="email" id="edit_email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit_post">Poste / Rôle administratif</label>
+                    <input type="text" id="edit_post" name="post_Admin" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit_password">Nouveau mot de passe (Laisser vide si inchangé)</label>
+                    <input type="password" id="edit_password" name="password" placeholder="Laisser vide pour garder l'actuel">
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" name="modifier_agent" class="btn-submit">Enregistrer</button>
+                    <button type="button" onclick="fermerModalEdit()" class="btn-submit" style="background-color: #6c757d;">Annuler</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
-        // Gestion du menu déroulant de l'avatar utilisateur
         function toggleUserMenu(event) {
             event.stopPropagation();
             var dropdown = document.getElementById('userDropdown');
             dropdown.classList.toggle('active');
         }
 
-        // Fermer le menu si on clique ailleurs sur la page
         window.onclick = function(event) {
             var dropdown = document.getElementById('userDropdown');
             if (dropdown && dropdown.classList.contains('active')) {
@@ -661,18 +682,32 @@ try {
         }
 
         function toggleSubmenu() {
-    var submenu = document.getElementById('submenuNotes');
-    var arrow = document.getElementById('arrow');
-    
-    if (submenu.style.display === 'none' || submenu.style.display === '') {
-        submenu.style.display = 'flex'; // Affiche le sous-menu
-        arrow.textContent = '▴';       // Change la flèche vers le haut
-    } else {
-        submenu.style.display = 'none'; // Masque le sous-menu
-        arrow.textContent = '▾';       // Change la flèche vers le bas
-    }
-}
-    </script>
+            var submenu = document.getElementById('submenuNotes');
+            var arrow = document.getElementById('arrow');
+            
+            if (submenu.style.display === 'none' || submenu.style.display === '') {
+                submenu.style.display = 'flex';
+                arrow.textContent = '▴';
+            } else {
+                submenu.style.display = 'none';
+                arrow.textContent = '▾';
+            }
+        }
 
+        // Fonctions pour gérer le Modal de modification
+        function ouvrirModalEdit(id, nom, prenom, email, poste) {
+            document.getElementById('edit_id_agent').value = id;
+            document.getElementById('edit_nom').value = nom;
+            document.getElementById('edit_prenom').value = prenom;
+            document.getElementById('edit_email').value = email;
+            document.getElementById('edit_post').value = poste;
+            document.getElementById('edit_password').value = ''; // Vider le champ MDP
+            document.getElementById('modalEdit').style.display = 'flex';
+        }
+
+        function fermerModalEdit() {
+            document.getElementById('modalEdit').style.display = 'none';
+        }
+    </script>
 </body>
 </html>
