@@ -48,9 +48,6 @@ $moy_sem = $coefs > 0 ? $somme / $coefs : null;
 .nt th:first-child,.nt td:first-child{text-align:left}
 .moy{font-weight:700}.moy.ok{color:var(--success)}.moy.ko{color:var(--error)}
 .pill{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--warning);color:var(--on-warning);margin-left:6px}
-.resume{display:flex;gap:30px;flex-wrap:wrap;align-items:center}
-.resume .val{font-size:30px;font-weight:700;color:var(--header)}
-.resume .val.ok{color:var(--success)}.resume .val.ko{color:var(--error)}
 .verdict{font-size:13px;font-weight:600;margin-top:2px}.verdict.ok{color:var(--success)}.verdict.ko{color:var(--error)}
 </style>
 
@@ -65,18 +62,6 @@ $moy_sem = $coefs > 0 ? $somme / $coefs : null;
 <?php if (!$error && empty($mods)): ?>
   <div class="card"><p class="muted">Aucun module n’est défini pour le semestre <?php echo $semestre; ?> dans le programme de votre spécialité.</p></div>
 <?php elseif (!$error): ?>
-  <div class="card">
-    <div class="resume">
-      <div>
-        <div class="muted">Moyenne du semestre <?php echo $semestre; ?></div>
-        <div class="val <?php echo cls_moy($moy_sem); ?>"><?php echo ico_moy($moy_sem) . fmt($moy_sem); ?> <span style="font-size:16px">/ 20</span>
-          <?php if ($moy_sem !== null && !$complet): ?><span class="pill">Provisoire</span><?php endif; ?></div>
-        <?php if ($moy_sem !== null): ?>
-          <div class="verdict <?php echo cls_moy($moy_sem); ?>"><?php echo $moy_sem >= 10 ? '' : ''; ?></div>
-        <?php endif; ?>
-      </div>
-    </div>
-  </div>
 
   <div class="card">
     <div class="tbl-wrap">
