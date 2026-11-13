@@ -30,18 +30,25 @@ try {
         }
     }
 
-    // 2. Traitement de l'ajout d'une spécialité
+    // 2. Traitement de l'ajout d'une spécialité (avec vérification anti-doublon nom + année)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajouter_specialite'])) {
         $nom_specialite = trim($_POST['nom_specialite'] ?? '');
         $annee = trim($_POST['annee'] ?? '');
-        $id_dep = trim($_POST['id_dep'] ?? '');
+        $id_dep = !empty($_POST['id_dep']) ? trim($_POST['id_dep']) : null;
 
-        if (!empty($nom_specialite) && !empty($annee) && !empty($id_dep)) {
-            $stmt = $pdo->prepare("INSERT INTO specialite (NomSp, annee, id_Dep) VALUES (?, ?, ?)");
-            $stmt->execute([$nom_specialite, $annee, $id_dep]);
-            $message = "La spécialité a été ajoutée avec succès !";
+        if (!empty($nom_specialite) && !empty($annee)) {
+            $stmt_check = $pdo->prepare("SELECT id_sp FROM specialite WHERE NomSp = ? AND annee = ?");
+            $stmt_check->execute([$nom_specialite, $annee]);
+
+            if ($stmt_check->rowCount() > 0) {
+                $error = "Erreur : La spécialité '$nom_specialite' pour l'année $annee existe déjà.";
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO specialite (NomSp, annee, id_Dep) VALUES (?, ?, ?)");
+                $stmt->execute([$nom_specialite, $annee, $id_dep]);
+                $message = "La spécialité a été ajoutée avec succès !";
+            }
         } else {
-            $error = "Veuillez remplir tous les champs pour la spécialité.";
+            $error = "Veuillez remplir les champs obligatoires pour la spécialité.";
         }
     }
 
@@ -49,11 +56,31 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajouter_module_catalogue'])) {
         $nom_mod = trim($_POST['nom_mod'] ?? '');
         if (!empty($nom_mod)) {
-            $stmt = $pdo->prepare("INSERT INTO module (Nom_mod) VALUES (?)");
-            $stmt->execute([$nom_mod]);
-            $message = "Le module a été ajouté au catalogue général avec succès !";
+            $stmt_chk_mod = $pdo->prepare("SELECT id_mod FROM module WHERE Nom_mod = ?");
+            $stmt_chk_mod->execute([$nom_mod]);
+
+            if ($stmt_chk_mod->rowCount() > 0) {
+                $error = "Ce module existe déjà dans le catalogue général.";
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO module (Nom_mod) VALUES (?)");
+                $stmt->execute([$nom_mod]);
+                $message = "Le module a été ajouté au catalogue général avec succès !";
+            }
         } else {
             $error = "Veuillez saisir un nom de module valide.";
+        }
+    }
+
+    // 3. bis Traitement de la suppression d'un module du catalogue général
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_module_catalogue'])) {
+        $id_mod_del = $_POST['id_mod_to_delete'] ?? '';
+        if (!empty($id_mod_del)) {
+            // Nettoyer d'abord les programmes qui utilisent ce module pour éviter les erreurs de clés étrangères
+            $pdo->prepare("DELETE FROM programme WHERE id_mod = ?")->execute([$id_mod_del]);
+            
+            // Supprimer le module du catalogue
+            $pdo->prepare("DELETE FROM module WHERE id_mod = ?")->execute([$id_mod_del]);
+            $message = "Le module a été supprimé du catalogue général avec succès.";
         }
     }
 
@@ -65,9 +92,16 @@ try {
         $coefficient = floatval($_POST['coefficient'] ?? 1.0);
 
         if (!empty($id_spec_target) && !empty($id_mod)) {
-            $stmt = $pdo->prepare("INSERT INTO programme (id_sp, id_mod, semestre, coefficient) VALUES (?, ?, ?, ?)");
-            $stmt->execute([$id_spec_target, $id_mod, $semestre, $coefficient]);
-            $message = "Module rattaché à la spécialité avec succès !";
+            $stmt_prog_check = $pdo->prepare("SELECT id_prog FROM programme WHERE id_sp = ? AND id_mod = ?");
+            $stmt_prog_check->execute([$id_spec_target, $id_mod]);
+
+            if ($stmt_prog_check->rowCount() > 0) {
+                $error = "Ce module est déjà rattaché au programme de cette spécialité.";
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO programme (id_sp, id_mod, semestre, coefficient) VALUES (?, ?, ?, ?)");
+                $stmt->execute([$id_spec_target, $id_mod, $semestre, $coefficient]);
+                $message = "Module rattaché à la spécialité avec succès !";
+            }
         } else {
             $error = "Veuillez sélectionner un module à ajouter.";
         }
@@ -77,11 +111,9 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_specialite'])) {
         $id_del = $_POST['id_spec_to_delete'] ?? '';
         
-        // Nettoyage des liaisons dans la table programme
-        $stmt_clean = $pdo->prepare("DELETE FROM programme WHERE id_sp= ?");
+        $stmt_clean = $pdo->prepare("DELETE FROM programme WHERE id_sp = ?");
         $stmt_clean->execute([$id_del]);
 
-        // Suppression de la spécialité
         $stmt_spec = $pdo->prepare("DELETE FROM specialite WHERE id_sp = ?");
         $stmt_spec->execute([$id_del]);
         
@@ -96,7 +128,7 @@ try {
 
     // Récupération des données globales
     $departements = $pdo->query("SELECT id_Dep, Nom_Dep FROM departement")->fetchAll(PDO::FETCH_ASSOC);
-    $specialites = $pdo->query("SELECT s.*, d.Nom_Dep FROM specialite s JOIN departement d ON s.id_Dep = d.id_Dep")->fetchAll(PDO::FETCH_ASSOC);
+    $specialites = $pdo->query("SELECT s.*, d.Nom_Dep FROM specialite s LEFT JOIN departement d ON s.id_Dep = d.id_Dep ORDER BY s.annee ASC, s.NomSp ASC")->fetchAll(PDO::FETCH_ASSOC);
     $modules_catalogue = $pdo->query("SELECT * FROM module ORDER BY Nom_mod ASC")->fetchAll(PDO::FETCH_ASSOC);
 
     // Détection de la spécialité sélectionnée pour édition
@@ -105,24 +137,25 @@ try {
     $programmes_spec = [];
 
     if ($id_spec_edit) {
-        // Infos sur la spécialité choisie
-        $stmt_sel = $pdo->prepare("SELECT s.*, d.Nom_Dep FROM specialite s JOIN departement d ON s.id_Dep = d.id_Dep WHERE s.id_sp = ?");
+        $stmt_sel = $pdo->prepare("SELECT s.*, d.Nom_Dep FROM specialite s LEFT JOIN departement d ON s.id_Dep = d.id_Dep WHERE s.id_sp = ?");
         $stmt_sel->execute([$id_spec_edit]);
         $selected_specialite = $stmt_sel->fetch(PDO::FETCH_ASSOC);
 
         if ($selected_specialite) {
-            // Récupérer uniquement les modules associés à cette spécialité
             $stmt_prog = $pdo->prepare("SELECT p.*, m.Nom_mod 
                                         FROM programme p 
                                         JOIN module m ON p.id_mod = m.id_mod 
                                         WHERE p.id_sp = ?
-                                        ORDER BY p.semestre ASC");
+                                        ORDER BY p.semestre ASC, m.Nom_mod ASC");
             $stmt_prog->execute([$id_spec_edit]);
             $programmes_spec = $stmt_prog->fetchAll(PDO::FETCH_ASSOC);
         }
     }
 
 } catch (PDOException $e) {
+    if (isset($pdo) && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
     $error = "Erreur de base de données : " . $e->getMessage();
 }
 ?>
@@ -157,7 +190,6 @@ try {
         .menu { display: flex; flex-direction: column; gap: 8px; }
         .menu-item { color: var(--on-blue); padding: 10px 15px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px; }
         .menu-item:hover, .menu-item.active { background-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-        .btn-logout { background-color: var(--error); color: var(--on-error); padding: 10px; border-radius: 8px; text-align: center; text-decoration: none; font-weight: 600; }
 
         .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
         .top-navbar { background-color: var(--header); color: var(--on-blue); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
@@ -186,7 +218,7 @@ try {
         .btn-delete { background-color: var(--error); color: var(--on-error); border: none; padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; }
 
         table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; }
-        th, td { padding: 10px; text-align: left; border-bottom: 1px solid var(--border); }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
         th { background-color: #f4ebd0; color: var(--header); font-weight: 600; }
 
         .alert-success { background-color: #d4edda; color: #155724; padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
@@ -194,73 +226,19 @@ try {
         
         .badge-semestre { background-color: var(--accent); color: var(--on-accent); padding: 3px 8px; border-radius: 12px; font-weight: 600; font-size: 12px; }
     
-        /* Style du profil utilisateur cliquable */
         .user-menu-container { position: relative; display: inline-block; cursor: pointer; }
-        .user-profile { display: flex; align-items: center; gap: 12px; }
-        .user-avatar { width: 38px; height: 38px; background-color: var(--accent); color: var(--on-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
-        
-        /* Dropdown du profil */
-        .user-dropdown {
-            display: none;
-            position: absolute;
-            right: 0;
-            top: 50px;
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            width: 240px;
-            z-index: 1000;
-            padding: 15px;
-            color: var(--text);
-        }
+        .user-dropdown { display: none; position: absolute; right: 0; top: 50px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 240px; z-index: 1000; padding: 15px; color: var(--text); }
         .user-dropdown.active { display: block; }
         .dropdown-header { font-weight: bold; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
         .dropdown-item { display: block; width: 100%; padding: 8px 10px; text-align: left; background: none; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; color: var(--text); margin-bottom: 5px; }
         .dropdown-item:hover { background-color: var(--bg); }
         .dropdown-item.logout { background-color: var(--error); color: var(--on-error); text-align: center; }
-        .dropdown-item.logout:hover { opacity: 0.9; }
 
-
-        .menu-dropdown {
-    position: relative;
-}
-
-.dropdown-toggle {
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-/* Le sous-menu */
-.submenu {
-    flex-direction: column;
-    gap: 4px;
-    padding-left: 15px;
-    margin-top: 4px;
-    margin-bottom: 4px;
-    border-left: 2px solid rgba(255, 255, 255, 0.2);
-}
-
-.submenu-item {
-    color: rgba(255, 255, 255, 0.85);
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 13px;
-    font-weight: 400;
-    transition: background 0.2s, color 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.submenu-item:hover, .submenu-item.active {
-    background-color: var(--accent);
-    color: var(--on-accent);
-    font-weight: 600;
-}
+        .menu-dropdown { position: relative; }
+        .dropdown-toggle { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .submenu { flex-direction: column; gap: 4px; padding-left: 15px; margin-top: 4px; margin-bottom: 4px; border-left: 2px solid rgba(255, 255, 255, 0.2); }
+        .submenu-item { color: rgba(255, 255, 255, 0.85); padding: 8px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 400; display: flex; align-items: center; gap: 8px; }
+        .submenu-item:hover, .submenu-item.active { background-color: var(--accent); color: var(--on-accent); font-weight: 600; }
     </style>
 </head>
 <body>
@@ -278,13 +256,10 @@ try {
                 <a href="gestion_specialites.php" class="menu-item active">📚 Spécialités & Départements</a>
                 <a href="gestion_examens.php" class="menu-item">📅 Plannings d'examens</a>
                 <div class="menu-dropdown">
-                    <!-- Le lien principal qui déclenche l'affichage au clic -->
                     <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
                         <span>📢 Notes, Absences & Annonces</span> 
                         <span id="arrow" style="font-size: 11px;">▾</span>
                     </a>
-                    
-                    <!-- Le sous-menu masqué par défaut grâce à l'attribut style="display: none;" -->
                     <div class="submenu" id="submenuNotes" style="display: none;">
                         <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
                         <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
@@ -295,19 +270,16 @@ try {
         </div>
     </div>
 
-    <!-- Main Content -->
     <div class="main-content">
         <div class="top-navbar">
-            <h2>Espace Scolarité - Gestion des Specialites et Departement</h2>
+            <h2>Espace Scolarité - Gestion des Spécialités et Départements</h2>
             
-            <!-- Profil utilisateur cliquable avec menu déroulant -->
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
                     <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
                     <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
                 </div>
 
-                <!-- Dropdown affiché au clic -->
                 <div id="userDropdown" class="user-dropdown">
                     <div class="dropdown-header">
                         Connecté en tant que<br>
@@ -325,7 +297,6 @@ try {
             <?php if (!empty($message)): ?><div class="alert-success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
             <?php if (!empty($error)): ?><div class="alert-error"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
-            <!-- Formulaires d'ajout (Département et Spécialité) -->
             <div class="admin-grid">
                 <div class="card">
                     <h3>Créer un département</h3>
@@ -350,9 +321,9 @@ try {
                             <input type="number" id="annee" name="annee" min="1" max="5" required placeholder="Ex: 5">
                         </div>
                         <div class="form-group">
-                            <label for="id_dep">Département de rattachement</label>
-                            <select id="id_dep" name="id_dep" required>
-                                <option value="">-- Choisir un département --</option>
+                            <label for="id_dep">Département de rattachement (Optionnel)</label>
+                            <select id="id_dep" name="id_dep">
+                                <option value="">-- Aucun département --</option>
                                 <?php foreach ($departements as $d): ?>
                                     <option value="<?php echo $d['id_Dep']; ?>"><?php echo htmlspecialchars($d['Nom_Dep']); ?></option>
                                 <?php endforeach; ?>
@@ -363,7 +334,6 @@ try {
                 </div>
             </div>
 
-            <!-- Liste des Spécialités -->
             <div class="card">
                 <h3>Spécialités enregistrées</h3>
                 <?php if (empty($specialites)): ?>
@@ -372,7 +342,7 @@ try {
                     <table>
                         <thead>
                             <tr>
-                                
+                                <th>ID</th>
                                 <th>Spécialité</th>
                                 <th>Année</th>
                                 <th>Département</th>
@@ -381,10 +351,11 @@ try {
                         </thead>
                         <tbody>
                             <?php foreach ($specialites as $spec): ?>
-                                
+                                <tr style="<?php echo ($selected_specialite && $selected_specialite['id_sp'] == $spec['id_sp']) ? 'background-color: #fdf8e9;' : ''; ?>">
+                                    <td><strong><?php echo htmlspecialchars($spec['id_sp']); ?></strong></td>
                                     <td><?php echo htmlspecialchars($spec['NomSp']); ?></td>
                                     <td>Année <?php echo htmlspecialchars($spec['annee']); ?></td>
-                                    <td><?php echo htmlspecialchars($spec['Nom_Dep']); ?></td>
+                                    <td><?php echo htmlspecialchars($spec['Nom_Dep'] ?? 'Aucun département'); ?></td>
                                     <td>
                                         <a href="gestion_specialites.php?id_spec_edit=<?php echo $spec['id_sp']; ?>" class="btn-edit">
                                             📖 Gérer les modules
@@ -401,7 +372,6 @@ try {
                 <?php endif; ?>
             </div>
 
-            <!-- BLOC DYNAMIQUE : S'affiche UNIQUEMENT si une spécialité est sélectionnée -->
             <?php if ($selected_specialite): ?>
                 <div class="card" style="border: 2px solid var(--accent); background-color: #fffdf9;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -411,8 +381,9 @@ try {
                         <a href="gestion_specialites.php" style="color: var(--text-muted); text-decoration: none; font-size: 13px;">❌ Fermer l'édition</a>
                     </div>
 
-                    <!-- Formulaire pour ajouter un module au programme de CETTE spécialité -->
-                    <form action="gestion_specialites.php?id_spec_edit=<?php echo $selected_specialite['id_sp']; ?>" method="POST" style="margin-bottom: 25px; padding: 15px; background: #fff; border-radius: 8px; border: 1px solid var(--border);">
+                    <!-- 1. Formulaire pour rattacher un module existant au programme -->
+                    <form action="gestion_specialites.php?id_spec_edit=<?php echo $selected_specialite['id_sp']; ?>" method="POST" style="margin-bottom: 20px; padding: 15px; background: #fff; border-radius: 8px; border: 1px solid var(--border);">
+                        <h4 style="font-size: 15px; color: var(--header); margin-bottom: 12px;">Rattacher un module existant au programme</h4>
                         <input type="hidden" name="id_spec_target" value="<?php echo $selected_specialite['id_sp']; ?>">
                         
                         <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 15px; align-items: end;">
@@ -437,21 +408,45 @@ try {
                                 <input type="number" step="0.5" id="coefficient" name="coefficient" min="1" max="10" value="1.0" required>
                             </div>
                             <div>
-                                <button type="submit" name="ajouter_module_programme" class="btn-submit">Ajouter au programme</button>
+                                <button type="submit" name="ajouter_module_programme" class="btn-submit">Ajouter</button>
                             </div>
                         </div>
                     </form>
 
-                    <!-- Formulaire secondaire pour ajouter rapidement un tout nouveau module au catalogue si absent -->
-                    <details style="margin-bottom: 20px; color: var(--text-muted); font-size: 13px;">
-                        <summary style="cursor: pointer; font-weight: 600;">➕ Le module souhaité n'est pas dans la liste ? Ajoutez-le au catalogue général.</summary>
-                        <form action="gestion_specialites.php?id_spec_edit=<?php echo $selected_specialite['id_sp']; ?>" method="POST" style="display: flex; gap: 10px; margin-top: 10px;">
-                            <input type="text" name="nom_mod" placeholder="Nom du nouveau module (ex: Compilation)" required style="padding: 8px; border-radius: 4px; border: 1px solid var(--border); flex: 1;">
-                            <button type="submit" name="ajouter_module_catalogue" class="btn-submit" style="width: auto;">Créer dans le catalogue</button>
+                    <!-- 2. Formulaire clair pour ajouter un nouveau module au catalogue général -->
+                    <div style="margin-bottom: 25px; padding: 15px; background: #f4ebd0; border-radius: 8px; border: 1px solid var(--border);">
+                        <h4 style="font-size: 15px; color: var(--header); margin-bottom: 8px;">➕ Gérer le catalogue général des modules</h4>
+                        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Créez un nouveau module ou supprimez un module obsolète du catalogue global.</p>
+                        
+                        <!-- Formulaire d'ajout -->
+                        <form action="gestion_specialites.php?id_spec_edit=<?php echo $selected_specialite['id_sp']; ?>" method="POST" style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+                            <input type="text" name="nom_mod" placeholder="Nom du nouveau module (ex: Compilation...)" required style="padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); flex: 1; background: #fff; font-size: 14px;">
+                            <button type="submit" name="ajouter_module_catalogue" class="btn-submit" style="width: auto; background-color: var(--menu);">Ajouter au catalogue</button>
                         </form>
-                    </details>
 
-                    <!-- Tableau des modules et coefficients de cette spécialité -->
+                        <!-- Tableau rapide pour supprimer un module du catalogue -->
+                        <?php if (!empty($modules_catalogue)): ?>
+                            <details style="font-size: 13px; color: var(--text);">
+                                <summary style="cursor: pointer; font-weight: 600; color: var(--header);">🗑️ Voir la liste du catalogue pour supprimer un module</summary>
+                                <div style="max-height: 150px; overflow-y: auto; margin-top: 10px; background: #fff; padding: 10px; border-radius: 6px; border: 1px solid var(--border);">
+                                    <table style="margin-top: 0;">
+                                        <?php foreach ($modules_catalogue as $mc): ?>
+                                            <tr>
+                                                <td style="padding: 6px 10px;"><?php echo htmlspecialchars($mc['Nom_mod']); ?></td>
+                                                <td style="padding: 6px 10px; text-align: right;">
+                                                    <form action="gestion_specialites.php?id_spec_edit=<?php echo $selected_specialite['id_sp']; ?>" method="POST" onsubmit="return confirm('Attention : Supprimer ce module du catalogue le retirera aussi de tous les programmes où il est utilisé. Continuer ?');" style="display:inline;">
+                                                        <input type="hidden" name="id_mod_to_delete" value="<?php echo $mc['id_mod']; ?>">
+                                                        <button type="submit" name="supprimer_module_catalogue" class="btn-delete" style="padding: 3px 8px; font-size: 11px;">Supprimer</button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </table>
+                                </div>
+                            </details>
+                        <?php endif; ?>
+                    </div>
+
                     <h4>Modules affectés à <?php echo htmlspecialchars($selected_specialite['NomSp']); ?></h4>
                     <?php if (empty($programmes_spec)): ?>
                         <p style="color: var(--text-muted); margin-top: 10px;">Aucun module n'a encore été associé à cette spécialité.</p>
@@ -489,14 +484,12 @@ try {
     </div>
 
     <script>
-        // Gestion du menu déroulant de l'avatar utilisateur
         function toggleUserMenu(event) {
             event.stopPropagation();
             var dropdown = document.getElementById('userDropdown');
             dropdown.classList.toggle('active');
         }
 
-        // Fermer le menu si on clique ailleurs sur la page
         window.onclick = function(event) {
             var dropdown = document.getElementById('userDropdown');
             if (dropdown && dropdown.classList.contains('active')) {
@@ -504,19 +497,18 @@ try {
             }
         }
 
-
         function toggleSubmenu() {
-    var submenu = document.getElementById('submenuNotes');
-    var arrow = document.getElementById('arrow');
-    
-    if (submenu.style.display === 'none' || submenu.style.display === '') {
-        submenu.style.display = 'flex'; // Affiche le sous-menu
-        arrow.textContent = '▴';       // Change la flèche vers le haut
-    } else {
-        submenu.style.display = 'none'; // Masque le sous-menu
-        arrow.textContent = '▾';       // Change la flèche vers le bas
-    }
-}
+            var submenu = document.getElementById('submenuNotes');
+            var arrow = document.getElementById('arrow');
+            
+            if (submenu.style.display === 'none' || submenu.style.display === '') {
+                submenu.style.display = 'flex';
+                arrow.textContent = '▴';
+            } else {
+                submenu.style.display = 'none';
+                arrow.textContent = '▾';
+            }
+        }
     </script>
 
 </body>
