@@ -13,6 +13,17 @@ $pass = '';
 
 $message = '';
 $error = '';
+$selected_section = null;
+$modules_section = [];
+$seances_grid = [];
+$specialites = [];
+$profs = [];
+$salles = [];
+$sections = [];
+$toutes_seances = [];
+$default_profs_names = [];
+$filter_sp = '';
+$filter_annee = '';
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass);
@@ -40,42 +51,76 @@ try {
         }
     }
 
+    // 1. bis Modification d'une section existante
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_section'])) {
+        $id_Sec = intval($_POST['id_Sec'] ?? 0);
+        $nom_sec = trim($_POST['nom_sec'] ?? '');
+        $id_sp = trim($_POST['id_sp'] ?? '');
+        $nombre_groupes = intval($_POST['nombre_groupes'] ?? 4);
+
+        if ($id_Sec > 0 && !empty($nom_sec) && !empty($id_sp)) {
+            $stmt_check = $pdo->prepare("SELECT id_Sec FROM section WHERE nom_sec = ? AND id_sp = ? AND id_Sec != ?");
+            $stmt_check->execute([$nom_sec, $id_sp, $id_Sec]);
+
+            if ($stmt_check->rowCount() > 0) {
+                $error = "Erreur : Une autre section porte déjà le nom '$nom_sec' pour cette spécialité.";
+            } else {
+                $stmt_upd = $pdo->prepare("UPDATE section SET nom_sec = ?, id_sp = ?, nombre_groupes = ? WHERE id_Sec = ?");
+                $stmt_upd->execute([$nom_sec, $id_sp, $nombre_groupes, $id_Sec]);
+                $message = "La section a été modifiée avec succès !";
+            }
+        } else {
+            $error = "Veuillez remplir tous les champs pour la modification.";
+        }
+    }
+
     // SUPPRESSION D'UNE SECTION
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_section'])) {
         $id_Sec_del = intval($_POST['id_Sec_to_delete'] ?? 0);
         if ($id_Sec_del > 0) {
-            // Optionnel : supprimer d'abord les séances liées pour éviter les erreurs de clé étrangère
             $pdo->prepare("DELETE FROM seance WHERE id_Sec = ?")->execute([$id_Sec_del]);
             
-            // Supprimer la section
             $stmt_del_sec = $pdo->prepare("DELETE FROM section WHERE id_Sec = ?");
             $stmt_del_sec->execute([$id_Sec_del]);
             
             $message = "La section a été supprimée avec succès.";
-            // Si la section supprimée était celle actuellement sélectionnée, on réinitialise la sélection
             if (isset($_GET['id_sec_selected']) && $_GET['id_sec_selected'] == $id_Sec_del) {
                 $_GET['id_sec_selected'] = null;
-                $id_sec_selected = null;
             }
         }
     }
 
-    // 2. Modification du professeur responsable d'un module
+    // 2. Modification du professeur responsable d'un module par saisie du nom (avec vérification en BDD)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_prof_module'])) {
         $id_mod_target = intval($_POST['id_mod_target'] ?? 0);
-        $id_prof_target = intval($_POST['id_prof_target'] ?? 0);
+        $nom_prof_saisi = trim($_POST['nom_prof_saisi'] ?? '');
 
-        if ($id_mod_target > 0 && $id_prof_target > 0) {
-            $stmt_ens = $pdo->prepare("INSERT INTO enseignement (id_prof, id_mod) VALUES (?, ?) 
-                                       ON DUPLICATE KEY UPDATE id_prof = VALUES(id_prof)");
-            $stmt_ens->execute([$id_prof_target, $id_mod_target]);
-            $message = "Le professeur responsable du module a été mis à jour avec succès !";
+        if ($id_mod_target > 0) {
+            if (empty($nom_prof_saisi)) {
+                $stmt_del = $pdo->prepare("DELETE FROM enseignement WHERE id_mod = ?");
+                $stmt_del->execute([$id_mod_target]);
+                $message = "Le professeur responsable a été retiré avec succès.";
+            } else {
+                $stmt_chk_prof = $pdo->prepare("SELECT p.id_prof FROM prof p JOIN user u ON p.id_user = u.id_user WHERE CONCAT(u.nom, ' ', u.prenom) = ? OR CONCAT(u.prenom, ' ', u.nom) = ? OR u.nom = ?");
+                $stmt_chk_prof->execute([$nom_prof_saisi, $nom_prof_saisi, $nom_prof_saisi]);
+                $prof_data = $stmt_chk_prof->fetch(PDO::FETCH_ASSOC);
+
+                if ($prof_data) {
+                    $id_prof_target = $prof_data['id_prof'];
+                    $stmt_ens = $pdo->prepare("INSERT INTO enseignement (id_prof, id_mod) VALUES (?, ?) 
+                                               ON DUPLICATE KEY UPDATE id_prof = VALUES(id_prof)");
+                    $stmt_ens->execute([$id_prof_target, $id_mod_target]);
+                    $message = "Le professeur responsable du module a été mis à jour avec succès !";
+                } else {
+                    $error = "Erreur : Le professeur '$nom_prof_saisi' n'existe pas dans la base de données.";
+                }
+            }
         } else {
-            $error = "Veuillez sélectionner un professeur valide.";
+            $error = "Module cible invalide.";
         }
     }
 
-    // 3. Enregistrement d'une séance (AVEC GESTION DES GROUPES ET CONFLITS SALLE/SECTION)
+    // 3. Enregistrement d'une séance (Professeur optionnel dans l'EDT)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajouter_seance'])) {
         $id_Sec = intval($_POST['id_Sec'] ?? 0);
         $jour = trim($_POST['jour'] ?? '');
@@ -84,28 +129,41 @@ try {
         $id_mod = intval($_POST['id_mod'] ?? 0);
         $type_seance = trim($_POST['type_seance'] ?? 'cours');
         $id_salle = intval($_POST['id_salle'] ?? 0);
-        $id_prof = intval($_POST['id_prof'] ?? 0);
+        $nom_prof_saisi = trim($_POST['nom_prof_saisi'] ?? '');
         $id_groupe = !empty($_POST['id_groupe']) ? intval($_POST['id_groupe']) : null;
+
+        $id_prof = null;
+        $prof_invalide = false;
+
+        if (!empty($nom_prof_saisi)) {
+            $stmt_chk_p = $pdo->prepare("SELECT p.id_prof FROM prof p JOIN user u ON p.id_user = u.id_user WHERE CONCAT(u.nom, ' ', u.prenom) = ? OR CONCAT(u.prenom, ' ', u.nom) = ? OR u.nom = ?");
+            $stmt_chk_p->execute([$nom_prof_saisi, $nom_prof_saisi, $nom_prof_saisi]);
+            $p_data = $stmt_chk_p->fetch(PDO::FETCH_ASSOC);
+            
+            if ($p_data) {
+                $id_prof = $p_data['id_prof'];
+            } else {
+                $prof_invalide = true;
+            }
+        }
 
         $stmt_sec_info = $pdo->prepare("SELECT nombre_groupes FROM section WHERE id_Sec = ?");
         $stmt_sec_info->execute([$id_Sec]);
         $sec_info = $stmt_sec_info->fetch(PDO::FETCH_ASSOC);
 
-        if ($type_seance !== 'cours' && (empty($id_groupe) || $id_groupe < 1 || $id_groupe > $sec_info['nombre_groupes'])) {
+        if ($prof_invalide) {
+            $error = "Erreur : Le professeur '$nom_prof_saisi' n'existe pas dans la base de données.";
+        } elseif ($type_seance !== 'cours' && (empty($id_groupe) || $id_groupe < 1 || $id_groupe > $sec_info['nombre_groupes'])) {
             $error = "Erreur : Pour un " . strtoupper($type_seance) . ", le groupe doit être compris entre 1 et " . $sec_info['nombre_groupes'] . ".";
-        } elseif ($id_Sec > 0 && !empty($jour) && !empty($heurD) && !empty($heurF) && $id_mod > 0 && $id_salle > 0 && $id_prof > 0) {
+        } elseif ($id_Sec > 0 && !empty($jour) && !empty($heurD) && !empty($heurF) && $id_mod > 0 && $id_salle > 0) {
             
-            // CONTRÔLE 1 : Vérifier si la salle est déjà occupée par n'importe quel cours/groupe sur ce créneau
             $stmt_conflict_room = $pdo->prepare("SELECT id_Seance FROM seance WHERE id_salle = ? AND jour = ? AND (heurD < ? AND heurF > ?)");
             $stmt_conflict_room->execute([$id_salle, $jour, $heurF, $heurD]);
 
-            // CONTRÔLE 2 : Vérifier les conflits de la section/groupe
             if ($type_seance === 'cours') {
-                // Un cours bloque toute la section
                 $stmt_conflict_sec = $pdo->prepare("SELECT id_Seance FROM seance WHERE id_Sec = ? AND jour = ? AND (heurD < ? AND heurF > ?)");
                 $stmt_conflict_sec->execute([$id_Sec, $jour, $heurF, $heurD]);
             } else {
-                // Un TD/TP bloque uniquement ce même groupe OU un cours global de la section
                 $stmt_conflict_sec = $pdo->prepare("SELECT id_Seance FROM seance WHERE id_Sec = ? AND jour = ? AND (heurD < ? AND heurF > ?) AND (id_groupe IS NULL OR id_groupe = ?)");
                 $stmt_conflict_sec->execute([$id_Sec, $jour, $heurF, $heurD, $id_groupe]);
             }
@@ -120,7 +178,7 @@ try {
                 $message = "Séance ajoutée avec succès à l'emploi du temps !";
             }
         } else {
-            $error = "Veuillez remplir tous les champs du formulaire.";
+            $error = "Veuillez remplir tous les champs obligatoires du formulaire.";
         }
     }
 
@@ -136,13 +194,11 @@ try {
     $profs = $pdo->query("SELECT p.id_prof, u.nom, u.prenom FROM prof p JOIN user u ON p.id_user = u.id_user ORDER BY u.nom ASC")->fetchAll(PDO::FETCH_ASSOC);
     $salles = $pdo->query("SELECT * FROM salle ORDER BY typeSalle, nom_salle")->fetchAll(PDO::FETCH_ASSOC);
 
-    // Récupérer TOUTES les séances de l'université pour vérifier la disponibilité des salles en temps réel côté JS
     $toutes_seances = $pdo->query("SELECT id_salle, jour, heurD, heurF FROM seance")->fetchAll(PDO::FETCH_ASSOC);
 
-    $stmt_ens_all = $pdo->query("SELECT id_mod, id_prof FROM enseignement");
-    $default_profs = [];
+    $stmt_ens_all = $pdo->query("SELECT e.id_mod, u.nom, u.prenom FROM enseignement e JOIN prof p ON e.id_prof = p.id_prof JOIN user u ON p.id_user = u.id_user");
     while ($row = $stmt_ens_all->fetch(PDO::FETCH_ASSOC)) {
-        $default_profs[$row['id_mod']] = $row['id_prof'];
+        $default_profs_names[$row['id_mod']] = trim($row['nom'] . ' ' . $row['prenom']);
     }
 
     $filter_sp = trim($_GET['filter_sp'] ?? '');
@@ -165,9 +221,6 @@ try {
     $sections = $stmt_sec->fetchAll(PDO::FETCH_ASSOC);
 
     $id_sec_selected = isset($_GET['id_sec_selected']) ? intval($_GET['id_sec_selected']) : null;
-    $selected_section = null;
-    $modules_section = [];
-    $seances_grid = [];
 
     if ($id_sec_selected) {
         $stmt_sel = $pdo->prepare("SELECT sec.*, sp.NomSp, sp.annee, sp.id_sp FROM section sec LEFT JOIN specialite sp ON sec.id_sp = sp.id_sp WHERE sec.id_Sec = ?");
@@ -175,7 +228,7 @@ try {
         $selected_section = $stmt_sel->fetch(PDO::FETCH_ASSOC);
 
         if ($selected_section) {
-            $stmt_mods = $pdo->prepare("SELECT m.id_mod, m.Nom_mod, p.semestre, p.coefficient, e.id_prof, u.nom as prof_nom, u.prenom as prof_prenom
+            $stmt_mods = $pdo->prepare("SELECT m.id_mod, m.Nom_mod, p.semestre, p.coefficient, u.nom as prof_nom, u.prenom as prof_prenom
                                        FROM programme p 
                                        JOIN module m ON p.id_mod = m.id_mod 
                                        LEFT JOIN enseignement e ON m.id_mod = e.id_mod
@@ -190,8 +243,8 @@ try {
                                            FROM seance s 
                                            JOIN module m ON s.id_mod = m.id_mod 
                                            JOIN salle sal ON s.id_salle = sal.id_salle 
-                                           JOIN prof p ON s.id_prof = p.id_prof
-                                           JOIN user u ON p.id_user = u.id_user
+                                           LEFT JOIN prof p ON s.id_prof = p.id_prof
+                                           LEFT JOIN user u ON p.id_user = u.id_user
                                            JOIN section sec_cible ON s.id_Sec = sec_cible.id_Sec
                                            WHERE s.id_Sec = ?");
             $stmt_seances->execute([$id_sec_selected]);
@@ -204,19 +257,19 @@ try {
         }
     }
 
-    $jours = ['Samedi', 'Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
-    $creneaux = [
-        ['08:00', '09:30'],
-        ['09:40', '11:10'],
-        ['11:20', '12:50'],
-        ['13:00', '14:30'],
-        ['14:40', '16:10'],
-        ['16:20', '17:50']
-    ];
-
 } catch (PDOException $e) {
     $error = "Erreur de base de données : " . $e->getMessage();
 }
+
+$jours = ['Samedi', 'Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
+$creneaux = [
+    ['08:00', '09:30'],
+    ['09:40', '11:10'],
+    ['11:20', '12:50'],
+    ['13:00', '14:30'],
+    ['14:40', '16:10'],
+    ['16:20', '17:50']
+];
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -271,11 +324,12 @@ try {
 
         .btn-submit { background-color: var(--header); color: var(--on-blue); border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; transition: background 0.2s; }
         .btn-submit:hover { background-color: var(--menu); }
-        .btn-edit { background-color: var(--menu); color: var(--on-blue); padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 600; text-decoration: none; display: inline-block; }
+        .btn-edit { background-color: var(--menu); color: var(--on-blue); padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 600; text-decoration: none; display: inline-block; cursor: pointer; border: none; }
+        .btn-edit:hover { background-color: var(--header); }
         .btn-delete { background-color: var(--error); color: var(--on-error); border: none; padding: 6px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; }
 
         table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; }
-        th, td { padding: 10px; text-align: left; border-bottom: 1px solid var(--border); }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
         th { background-color: #f4ebd0; color: var(--header); font-weight: 600; }
 
         .alert-success { background-color: #d4edda; color: #155724; padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
@@ -285,27 +339,28 @@ try {
         .edt-table th, .edt-table td { border: 1px solid var(--border); text-align: center; vertical-align: top; padding: 8px; font-size: 12px; }
         .edt-cell { cursor: pointer; min-height: 70px; background-color: #fafbfc; transition: background 0.2s; }
         .edt-cell:hover { background-color: #f0f7ff; }
-        .seance-card { border-left: 5px solid #1B5A80; background: #eef5f9; color: var(--text); border-radius: 6px; padding: 7px 8px; margin-bottom: 6px; text-align: left; font-size: 13px; line-height: 1.5; }
+        .seance-card { border-left: 5px solid #1B5A80; background: #eef5f9; color: var(--text); border-radius: 6px; padding: 7px 8px; margin-bottom: 6px; text-align: left; font-size: 13px; line-height: 1.5; position: relative; padding-right: 34px; }
         .seance-card.TD { border-color: #2e7d32; background: #eef7ee; }
         .seance-card.TP { border-color: #8a5300; background: #fbf1e3; }
         .seance-card strong { display: block; font-size: 13px; }
         .type-pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; color: #fff; background: #1B5A80; margin-bottom: 3px; }
         .type-pill.TD { background: #2e7d32; }
         .type-pill.TP { background: #8a5300; }
-        .seance-card { position: relative; padding-right: 34px; }
         .seance-card form { position: absolute; top: 6px; right: 6px; margin: 0; }
         .btn-del-x { background: transparent; color: var(--error); border: none; width: 24px; height: 24px; border-radius: 50%; font-size: 14px; font-weight: 700; line-height: 1; cursor: pointer; }
         .btn-del-x:hover { background: var(--error); color: var(--on-error); }
 
-        #modalSeance { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+        .badge-status { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+        .badge-assigned { background-color: #d4edda; color: #155724; }
+        .badge-unassigned { background-color: #fff3cd; color: #856404; }
+
+        #modalSeance, #modalModifierSection { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
         .modal-content { background: white; padding: 25px; border-radius: 10px; width: 450px; max-width: 90%; }
     
-        /* Style du profil utilisateur cliquable */
         .user-menu-container { position: relative; display: inline-block; cursor: pointer; }
         .user-profile { display: flex; align-items: center; gap: 12px; }
         .user-avatar { width: 38px; height: 38px; background-color: var(--accent); color: var(--on-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
         
-        /* Dropdown du profil */
         .user-dropdown {
             display: none;
             position: absolute;
@@ -325,50 +380,21 @@ try {
         .dropdown-item { display: block; width: 100%; padding: 8px 10px; text-align: left; background: none; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; color: var(--text); margin-bottom: 5px; }
         .dropdown-item:hover { background-color: var(--bg); }
         .dropdown-item.logout { background-color: var(--error); color: var(--on-error); text-align: center; }
-        .dropdown-item.logout:hover { opacity: 0.9; }
 
-        .menu-dropdown {
-            position: relative;
-        }
-
-        .dropdown-toggle {
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        /* Le sous-menu */
-        .submenu {
-            flex-direction: column;
-            gap: 4px;
-            padding-left: 15px;
-            margin-top: 4px;
-            margin-bottom: 4px;
-            border-left: 2px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .submenu-item {
-            color: rgba(255, 255, 255, 0.85);
-            padding: 8px 12px;
-            border-radius: 6px;
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 400;
-            transition: background 0.2s, color 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .submenu-item:hover, .submenu-item.active {
-            background-color: var(--accent);
-            color: var(--on-accent);
-            font-weight: 600;
-        }
+        .menu-dropdown { position: relative; }
+        .dropdown-toggle { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .submenu { flex-direction: column; gap: 4px; padding-left: 15px; margin-top: 4px; margin-bottom: 4px; border-left: 2px solid rgba(255, 255, 255, 0.2); }
+        .submenu-item { color: rgba(255, 255, 255, 0.85); padding: 8px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 400; display: flex; align-items: center; gap: 8px; }
+        .submenu-item:hover, .submenu-item.active { background-color: var(--accent); color: var(--on-accent); font-weight: 600; }
     </style>
 </head>
 <body>
+
+    <datalist id="liste_professeurs">
+        <?php foreach ($profs as $p): ?>
+            <option value="<?php echo htmlspecialchars($p['nom'] . ' ' . $p['prenom']); ?>">
+        <?php endforeach; ?>
+    </datalist>
 
     <div class="sidebar">
         <div class="sidebar-top">
@@ -387,7 +413,6 @@ try {
                         <span>📢 Notes, Absences & Annonces</span> 
                         <span id="arrow" style="font-size: 11px;">▾</span>
                     </a>
-                    
                     <div class="submenu" id="submenuNotes" style="display: none;">
                         <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
                         <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
@@ -398,10 +423,9 @@ try {
         </div>
     </div>
 
-    <!-- Main Content -->
     <div class="main-content">
         <div class="top-navbar">
-            <h2>Espace Scolarité - Gestion des Section et Emplois du Temps</h2>
+            <h2>Espace Scolarité - Gestion des Sections et Emplois du Temps</h2>
             
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
@@ -482,6 +506,7 @@ try {
                     <table>
                         <thead>
                             <tr>
+                                
                                 <th>Nom de la Section</th>
                                 <th>Spécialité</th>
                                 <th>Année</th>
@@ -491,16 +516,18 @@ try {
                         </thead>
                         <tbody>
                             <?php foreach ($sections as $sec): ?>
-                                
+                                <tr style="<?php echo ($selected_section && $selected_section['id_Sec'] == $sec['id_Sec']) ? 'background-color: #fdf8e9;' : ''; ?>">
                                     <td><?php echo htmlspecialchars($sec['nom_sec']); ?></td>
                                     <td><?php echo htmlspecialchars($sec['NomSp']); ?></td>
                                     <td>Année <?php echo htmlspecialchars($sec['annee']); ?></td>
                                     <td><?php echo htmlspecialchars($sec['nombre_groupes']); ?> groupe(s)</td>
                                     <td style="display: flex; gap: 8px; align-items: center;">
                                         <a href="gestion_sections.php?id_sec_selected=<?php echo $sec['id_Sec']; ?>&filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" class="btn-edit">
-                                            ⚙️ Gérer l'EDT
+                                            ⚙️ Gérer l'EDT & Profs
                                         </a>
-                                        <!-- Formulaire de suppression de section -->
+                                        <button type="button" class="btn-edit" style="background-color: var(--header);" onclick="ouvrirModalModifierSection(<?php echo $sec['id_Sec']; ?>, '<?php echo htmlspecialchars(addslashes($sec['nom_sec'])); ?>', '<?php echo $sec['id_sp']; ?>', <?php echo $sec['nombre_groupes']; ?>)">
+                                            ✏️ Modifier
+                                        </button>
                                         <form action="gestion_sections.php?filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" method="POST" style="display:inline; margin:0;">
                                             <input type="hidden" name="id_Sec_to_delete" value="<?php echo $sec['id_Sec']; ?>">
                                             <button type="submit" name="supprimer_section" class="btn-delete" onclick="return confirm('Attention : La suppression de cette section supprimera également ses séances associées. Voulez-vous continuer ?');">
@@ -524,51 +551,50 @@ try {
                         <a href="gestion_sections.php" style="color: var(--text-muted); text-decoration: none; font-size: 13px;">❌ Fermer</a>
                     </div>
 
-                    <div style="margin-bottom: 20px;">
-                        <button type="button" onclick="toggleModulesProfs()" id="btnToggleMP" class="btn-submit" style="background-color: var(--menu); width: auto;">
-                            📋 Afficher les modules et professeurs de cette section
-                        </button>
-                    </div>
+                    <!-- BLOC PROFESSEURS ASSOCIÉS AUX MODULES -->
+                    <div class="card" style="border: 1px solid var(--header); background: #fff; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.02);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h4 style="color: var(--header); font-size: 16px;">👨‍🏫 Attribution des Professeurs Responsables par Module</h4>
+                            <span style="font-size: 12px; color: var(--text-muted);">Tapez le nom et prénom de l'enseignant</span>
+                        </div>
 
-                    <div id="blocModulesProfs" class="card" style="display: none; border: 1px solid var(--header); background: #fff; margin-bottom: 25px;">
-                        <h4 style="color: var(--header); margin-bottom: 15px;">📖 Modules & Professeurs Responsables</h4>
                         <?php if (empty($modules_section)): ?>
                             <p style="color: var(--text-muted);">Aucun module trouvé dans le programme de cette spécialité.</p>
                         <?php else: ?>
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Module</th>
-                                        <th>Semestre</th>
-                                        <th>Coefficient</th>
-                                        <th>Professeur responsable</th>
-                                        <th>Action</th>
+                                        <th style="width: 25%;">Module</th>
+                                        <th style="width: 10%;">Semestre</th>
+                                        <th style="width: 10%;">Coeff</th>
+                                        <th style="width: 15%;">Statut actuel</th>
+                                        <th style="width: 40%;">Nom du professeur (Saisie validée)</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php foreach ($modules_section as $ms): ?>
+                                    <?php foreach ($modules_section as $ms): 
+                                        $nom_prof_actuel = (!empty($ms['prof_nom'])) ? trim($ms['prof_nom'] . ' ' . $ms['prof_prenom']) : '';
+                                    ?>
                                         <tr>
-                                            <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>" method="POST">
-                                                <input type="hidden" name="id_mod_target" value="<?php echo $ms['id_mod']; ?>">
-                                                <td><strong><?php echo htmlspecialchars($ms['Nom_mod']); ?></strong></td>
-                                                <td>S<?php echo htmlspecialchars($ms['semestre']); ?></td>
-                                                <td>Coeff <?php echo htmlspecialchars($ms['coefficient']); ?></td>
-                                                <td>
-                                                    <select name="id_prof_target" required style="padding: 6px; border-radius: 4px; border: 1px solid var(--border); width: 100%; background: #fff;">
-                                                        <option value="">-- Choisir un professeur --</option>
-                                                        <?php foreach ($profs as $p): ?>
-                                                            <option value="<?php echo $p['id_prof']; ?>" <?php echo ($ms['id_prof'] == $p['id_prof']) ? 'selected' : ''; ?>>
-                                                                <?php echo htmlspecialchars($p['nom'] . ' ' . $p['prenom']); ?>
-                                                            </option>
-                                                        <?php endforeach; ?>
-                                                    </select>
-                                                </td>
-                                                <td>
-                                                    <button type="submit" name="modifier_prof_module" class="btn-submit" style="width: auto; padding: 6px 12px; font-size: 12px; background-color: var(--menu);">
+                                            <td><strong><?php echo htmlspecialchars($ms['Nom_mod']); ?></strong></td>
+                                            <td><span class="type-pill">S<?php echo htmlspecialchars($ms['semestre']); ?></span></td>
+                                            <td>Coeff <?php echo htmlspecialchars($ms['coefficient']); ?></td>
+                                            <td>
+                                                <?php if (!empty($nom_prof_actuel)): ?>
+                                                    <span class="badge-status badge-assigned">✓ <?php echo htmlspecialchars($nom_prof_actuel); ?></span>
+                                                <?php else: ?>
+                                                    <span class="badge-status badge-unassigned">⚠ Non assigné</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>" method="POST" style="display: flex; gap: 8px; align-items: center; margin: 0;">
+                                                    <input type="hidden" name="id_mod_target" value="<?php echo $ms['id_mod']; ?>">
+                                                    <input type="text" name="nom_prof_saisi" list="liste_professeurs" value="<?php echo htmlspecialchars($nom_prof_actuel); ?>" placeholder="Tapez le nom du prof..." required style="padding: 7px; border-radius: 6px; border: 1px solid var(--border); flex: 1; background: #FAFCFE; font-size: 13px;">
+                                                    <button type="submit" name="modifier_prof_module" class="btn-submit" style="width: auto; padding: 7px 12px; font-size: 12px; background-color: var(--menu); white-space: nowrap;">
                                                         💾 Enregistrer
                                                     </button>
-                                                </td>
-                                            </form>
+                                                </form>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -604,7 +630,8 @@ try {
                                                         echo '<span class="type-pill ' . htmlspecialchars($s['type_seance']) . '">' . htmlspecialchars(strtoupper($s['type_seance'])) . ($s['id_groupe'] ? ' · G' . (int)$s['id_groupe'] : '') . '</span>';
                                                         echo '<strong>' . htmlspecialchars($s['Nom_mod']) . '</strong>';
                                                         echo '🏛️ ' . htmlspecialchars($s['nom_salle']) . '<br>';
-                                                        echo '👨‍🏫 ' . htmlspecialchars($s['prof_nom'] . ' ' . $s['prof_prenom']);
+                                                        $affichage_prof = (!empty($s['prof_nom'])) ? htmlspecialchars($s['prof_nom'] . ' ' . $s['prof_prenom']) : '<em style="color: var(--text-muted);">Non assigné</em>';
+                                                        echo '👨‍🏫 ' . $affichage_prof;
                                                         echo '<form method="POST" action="gestion_sections.php?id_sec_selected=' . $selected_section['id_Sec'] . '">
                                                         <input type="hidden" name="id_Seance_to_delete" value="' . $s['id_Seance'] . '">
                                                         <button type="submit" name="supprimer_seance" class="btn-del-x" title="Supprimer cette séance" aria-label="Supprimer cette séance" onclick="event.stopPropagation(); return confirm(\'Supprimer cette séance ?\');">✕</button>
@@ -627,6 +654,7 @@ try {
         </div>
     </div>
 
+    <!-- Modale de planification de séance -->
     <?php if ($selected_section): ?>
     <div id="modalSeance">
         <div class="modal-content">
@@ -644,7 +672,7 @@ try {
 
                 <div class="form-group">
                     <label for="modal_id_mod">Module</label>
-                    <select id="modal_id_mod" name="id_mod" onchange="autoSelectProf()" required>
+                    <select id="modal_id_mod" name="id_mod" onchange="autoSelectProfName()" required>
                         <option value="">-- Choisir un module --</option>
                         <?php foreach ($modules_section as $ms): ?>
                             <option value="<?php echo $ms['id_mod']; ?>"><?php echo htmlspecialchars($ms['Nom_mod'] . ' (Semestre ' . $ms['semestre'] . ')'); ?></option>
@@ -674,15 +702,8 @@ try {
                 </div>
 
                 <div class="form-group">
-                    <label for="modal_id_prof">Professeur</label>
-                    <select id="modal_id_prof" name="id_prof" required>
-                        <option value="">-- Sélectionner un professeur --</option>
-                        <?php foreach ($profs as $p): ?>
-                            <option value="<?php echo $p['id_prof']; ?>">
-                                <?php echo htmlspecialchars($p['nom'] . ' ' . $p['prenom']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                    <label for="modal_nom_prof">Professeur responsable (Optionnel)</label>
+                    <input type="text" id="modal_nom_prof" name="nom_prof_saisi" list="liste_professeurs" placeholder="Laisser vide ou taper le nom du prof...">
                 </div>
 
                 <div class="form-group" id="groupe_container" style="display:none;">
@@ -699,25 +720,58 @@ try {
     </div>
     <?php endif; ?>
 
+    <!-- Modale de modification d'une section -->
+    <div id="modalModifierSection">
+        <div class="modal-content">
+            <h3 style="margin-bottom: 15px; color: var(--header);">Modifier la section</h3>
+            <form action="gestion_sections.php?filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" method="POST">
+                <input type="hidden" id="edit_id_Sec" name="id_Sec">
+                
+                <div class="form-group">
+                    <label for="edit_nom_sec">Nom de la section</label>
+                    <input type="text" id="edit_nom_sec" name="nom_sec" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="edit_id_sp">Spécialité</label>
+                    <select id="edit_id_sp" name="id_sp" required>
+                        <option value="">-- Choisir une spécialité --</option>
+                        <?php foreach ($specialites as $sp): ?>
+                            <option value="<?php echo $sp['id_sp']; ?>"><?php echo htmlspecialchars($sp['NomSp'] . ' (Année ' . $sp['annee'] . ')'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="edit_nombre_groupes">Nombre de groupes</label>
+                    <input type="number" id="edit_nombre_groupes" name="nombre_groupes" min="1" max="10" required>
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" name="modifier_section" class="btn-submit">Enregistrer les modifications</button>
+                    <button type="button" onclick="fermerModalModifierSection()" class="btn-submit" style="background-color: #6c757d;">Annuler</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
-        var defaultProfs = <?php echo json_encode($default_profs); ?>;
+        var defaultProfsNames = <?php echo json_encode($default_profs_names); ?>;
         var toutesSeances = <?php echo json_encode($toutes_seances); ?>;
         var currentJour = '';
         var currentHeurD = '';
         var currentHeurF = '';
 
-        function toggleModulesProfs() {
-            var bloc = document.getElementById('blocModulesProfs');
-            var btn = document.getElementById('btnToggleMP');
-            if (bloc.style.display === 'none') {
-                bloc.style.display = 'block';
-                btn.textContent = '❌ Masquer les modules et professeurs';
-                btn.style.backgroundColor = '#6c757d';
-            } else {
-                bloc.style.display = 'none';
-                btn.textContent = '📋 Afficher les modules et professeurs de cette section';
-                btn.style.backgroundColor = 'var(--menu)';
-            }
+        function ouvrirModalModifierSection(id, nom, idSp, nbGroupes) {
+            document.getElementById('edit_id_Sec').value = id;
+            document.getElementById('edit_nom_sec').value = nom;
+            document.getElementById('edit_id_sp').value = idSp;
+            document.getElementById('edit_nombre_groupes').value = nbGroupes;
+            document.getElementById('modalModifierSection').style.display = 'flex';
+        }
+
+        function fermerModalModifierSection() {
+            document.getElementById('modalModifierSection').style.display = 'none';
         }
 
         function ouvrirModalSeance(jour, heurD, heurF) {
@@ -737,11 +791,13 @@ try {
             document.getElementById('modalSeance').style.display = 'none';
         }
 
-        function autoSelectProf() {
+        function autoSelectProfName() {
             var modId = document.getElementById('modal_id_mod').value;
-            var profSelect = document.getElementById('modal_id_prof');
-            if (defaultProfs[modId]) {
-                profSelect.value = defaultProfs[modId];
+            var profInput = document.getElementById('modal_nom_prof');
+            if (defaultProfsNames[modId]) {
+                profInput.value = defaultProfsNames[modId];
+            } else {
+                profInput.value = '';
             }
         }
 
