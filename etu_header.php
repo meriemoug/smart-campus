@@ -101,6 +101,49 @@ body{background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:h
 <div class="main-content">
   <div class="top-navbar">
     <h2>Espace Étudiant - <?php echo htmlspecialchars($page_title); ?></h2>
+
+    <?php
+// Récupérer les notifications non lues et la liste des notifications pour l'utilisateur connecté
+$id_user_connecte = $_SESSION['id_user'];
+$stmt_notifs = $pdo->prepare("SELECT * FROM notification WHERE id_user = ? ORDER BY date_creation DESC LIMIT 15");
+$stmt_notifs->execute([$id_user_connecte]);
+$notifications = $stmt_notifs->fetchAll(PDO::FETCH_ASSOC);
+
+$stmt_count = $pdo->prepare("SELECT COUNT(*) FROM notification WHERE id_user = ? AND lu = 0");
+$stmt_count->execute([$id_user_connecte]);
+$nb_non_lus = $stmt_count->fetchColumn();
+?>
+
+<!-- Conteneur des notifications -->
+<div class="notif-menu-container" onclick="toggleNotifMenu(event)" style="position: relative; cursor: pointer; margin-right: -160px;">
+    <div style="font-size: 20px; position: relative;">
+        🔔
+        <?php if ($nb_non_lus > 0): ?>
+            <span style="position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; background-color: #dc2626; border-radius: 50%; border: 2px solid var(--header);"></span>
+        <?php endif; ?>
+    </div>
+
+    <!-- Dropdown des notifications -->
+    <div id="notifDropdown" class="user-dropdown" style="width: 320px; max-height: 400px; overflow-y: auto; right: 0; left: auto;">
+        <div class="dropdown-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Notifications</span>
+            <?php if ($nb_non_lus > 0): ?>
+                <span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 10px; font-size: 11px;"><?= $nb_non_lus ?> non lue(s)</span>
+            <?php endif; ?>
+        </div>
+        
+        <?php if (empty($notifications)): ?>
+            <div style="padding: 15px; text-align: center; color: #64748b; font-size: 13px;">Aucune notification pour le moment.</div>
+        <?php else: ?>
+            <?php foreach ($notifications as $n): ?>
+                <a href="marquer_lu.php?id=<?= $n['id_notif'] ?>&type=<?= $n['type'] ?>" class="dropdown-item" style="white-space: normal; border-bottom: 1px solid #f1f5f9; background: <?= $n['lu'] == 0 ? '#f8fafc' : 'white'; ?>; padding: 10px 15px;">
+                    <div style="font-size: 12px; color: #64748b; margin-bottom: 3px;"><?= date('d/m/Y H:i', strtotime($n['date_creation'])) ?></div>
+                    <div style="font-size: 13px; color: var(--text); font-weight: <?= $n['lu'] == 0 ? 'bold' : 'normal'; ?>;"><?= htmlspecialchars($n['message']) ?></div>
+                </a>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+</div>
     <div class="user-menu-container" onclick="toggleUserMenu(event)">
       <div class="user-profile">
         <span><strong><?php echo htmlspecialchars(($_SESSION['prenom'] ?? '') . ' ' . ($_SESSION['nom'] ?? '')); ?></strong></span>
@@ -115,5 +158,24 @@ body{background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:h
         <a href="logout.php" class="dropdown-item logout">Se déconnecter</a>
       </div>
     </div>
+    
   </div>
+  <script>
+    function toggleNotifMenu(event) {
+    event.stopPropagation();
+    const dropdown = document.getElementById('notifDropdown');
+    dropdown.classList.toggle('active');
+    // Fermer l'autre menu utilisateur si ouvert
+    const userDropdown = document.getElementById('userDropdown');
+    if(userDropdown) userDropdown.classList.remove('active');
+}
+
+// Mettre à jour l'événement global de clic pour fermer le menu notif
+window.addEventListener('click', function() {
+    const notifDropdown = document.getElementById('notifDropdown');
+    if (notifDropdown && notifDropdown.classList.contains('active')) {
+        notifDropdown.classList.remove('active');
+    }
+});
+  </script>
   <div class="content-body">

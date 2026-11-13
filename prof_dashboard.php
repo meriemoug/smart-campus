@@ -18,10 +18,21 @@ $prenom_prof = $_SESSION['prenom'] ?? '';
 
 $emploi_du_temps = [];
 $error = '';
+$notifications = [];
+$nb_non_lus = 0;
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    // Récupérer les notifications et le compteur non lus
+    $stmt_notifs = $pdo->prepare("SELECT * FROM notification WHERE id_user = ? ORDER BY date_creation DESC LIMIT 15");
+    $stmt_notifs->execute([$id_prof]);
+    $notifications = $stmt_notifs->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmt_count = $pdo->prepare("SELECT COUNT(*) FROM notification WHERE id_user = ? AND lu = 0");
+    $stmt_count->execute([$id_prof]);
+    $nb_non_lus = $stmt_count->fetchColumn();
 
     // Requête pour récupérer l'emploi du temps du professeur
     $stmt = $pdo->prepare("
@@ -73,6 +84,8 @@ $jours = ['Samedi', 'Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
             --card: #FFFFFF;
             --border: #E0C98A;
             --text: #16384D;
+            --error: #A8162A;
+            --on-error: #FFFFFF;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -86,6 +99,7 @@ $jours = ['Samedi', 'Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
             flex-direction: column; 
             justify-content: space-between; 
             padding: 20px;
+            box-shadow: 4px 0 10px rgba(0,0,0,0.05);
         }
         .logo-area { 
             color: var(--on-blue); 
@@ -97,16 +111,17 @@ $jours = ['Samedi', 'Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
         }
         .menu { display: flex; flex-direction: column; gap: 8px; }
         .menu-item { 
+            background-color: transparent;
             color: var(--on-blue); 
-            padding: 12px 15px; 
+            padding: 10px 15px; 
             border-radius: 8px; 
             text-decoration: none; 
             font-size: 14px; 
             font-weight: 500; 
             display: flex; 
             align-items: center; 
-            gap: 12px; 
-            transition: 0.2s;
+            gap: 10px; 
+            transition: background 0.2s;
         }
         .menu-item:hover, .menu-item.active { 
             background-color: var(--accent); 
@@ -114,49 +129,28 @@ $jours = ['Samedi', 'Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
             font-weight: 600; 
         }
 
-        .user-info {
-            color: var(--on-blue);
-            font-size: 13px;
-            padding-top: 15px;
-            border-top: 1px solid rgba(255,255,255,0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .btn-logout { color: var(--accent); text-decoration: none; font-weight: 600; }
-
         /* Contenu Principal */
         .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
-        .top-navbar { background-color: var(--header); color: var(--on-blue); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        .top-navbar { background-color: var(--header); color: var(--on-blue); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
         .content-body { padding: 30px; max-width: 1300px; margin: 0 auto; width: 100%; }
 
         .card { background-color: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 25px; box-shadow: 0 4px 12px rgba(27,90,128,0.04); margin-bottom: 25px; }
         .page-title { color: var(--header); font-size: 22px; font-weight: 700; margin-bottom: 20px; }
 
-        /* --- STYLES DU MENU UTILISATEUR DÉROULANT --- */
-        .user-menu-container {
+        /* --- STYLES DU PROFIL UTILISATEUR ET NOTIFICATIONS (Style Admin Dashboard) --- */
+        .user-menu-container, .notif-menu-container {
             position: relative;
+            display: inline-block;
             cursor: pointer;
         }
         .user-profile {
             display: flex;
             align-items: center;
-            gap: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 6px 12px;
-            border-radius: 30px;
-            transition: background 0.2s;
-        }
-        .user-profile:hover {
-            background: rgba(255, 255, 255, 0.2);
-        }
-        .user-profile span {
-            color: var(--on-blue);
-            font-size: 14px;
+            gap: 12px;
         }
         .user-avatar {
-            width: 35px;
-            height: 35px;
+            width: 38px;
+            height: 38px;
             background-color: var(--accent);
             color: var(--on-accent);
             border-radius: 50%;
@@ -171,42 +165,50 @@ $jours = ['Samedi', 'Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
             position: absolute;
             right: 0;
             top: 50px;
-            background: white;
-            color: var(--text);
-            width: 240px;
-            border-radius: 8px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.15);
+            background: var(--card);
             border: 1px solid var(--border);
-            z-index: 100;
-            overflow: hidden;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            width: 240px;
+            z-index: 1000;
+            padding: 15px;
+            color: var(--text);
         }
-        .user-dropdown.show {
+        .user-dropdown.active {
             display: block;
         }
         .dropdown-header {
-            padding: 12px 15px;
-            background: #f8fafc;
-            border-bottom: 1px solid #eee;
+            font-weight: bold;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
             font-size: 13px;
-            color: #64748b;
         }
         .dropdown-item {
             display: block;
-            padding: 12px 15px;
-            color: var(--text);
+            width: 100%;
+            padding: 8px 10px;
+            text-align: left;
+            background: none;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
             text-decoration: none;
-            font-size: 14px;
-            transition: background 0.2s;
+            color: var(--text);
+            margin-bottom: 5px;
         }
         .dropdown-item:hover {
-            background: #f1f5f9;
+            background-color: var(--bg);
         }
         .dropdown-item.logout {
-            color: #dc2626;
-            border-top: 1px solid #eee;
+            background-color: var(--error);
+            color: var(--on-error);
+            text-align: center;
         }
         .dropdown-item.logout:hover {
-            background: #ffeeef;
+            opacity: 0.9;
         }
 
         /* Tableau Emploi du Temps */
@@ -279,22 +281,54 @@ $jours = ['Samedi', 'Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
     <div class="main-content">
         <div class="top-navbar">
             <h2>Espace Enseignant - Emploi du Temps</h2>
-            
-            <!-- Profil utilisateur cliquable avec menu déroulant -->
-            <div class="user-menu-container" onclick="toggleUserMenu(event)">
-                <div class="user-profile">
-                    <span><strong><?php echo htmlspecialchars( $nom_prof . ' ' . $prenom_prof); ?></strong></span>
-                    <div class="user-avatar"><?php echo strtoupper(substr($prenom_prof, 0, 1)); ?></div>
+
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <!-- Conteneur des notifications -->
+                <div class="notif-menu-container" onclick="toggleNotifMenu(event)">
+                    <div style="font-size: 20px; position: relative;">
+                        🔔
+                        <?php if ($nb_non_lus > 0): ?>
+                            <span style="position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; background-color: #dc2626; border-radius: 50%; border: 2px solid var(--header);"></span>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Dropdown des notifications -->
+                    <div id="notifDropdown" class="user-dropdown" style="width: 320px; max-height: 400px; overflow-y: auto; right: 0; left: auto;">
+                        <div class="dropdown-header" style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>Notifications</span>
+                            <?php if ($nb_non_lus > 0): ?>
+                                <span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 10px; font-size: 11px;"><?= $nb_non_lus ?> non lue(s)</span>
+                            <?php endif; ?>
+                        </div>
+                        
+                        <?php if (empty($notifications)): ?>
+                            <div style="padding: 15px; text-align: center; color: #64748b; font-size: 13px;">Aucune notification pour le moment.</div>
+                        <?php else: ?>
+                            <?php foreach ($notifications as $n): ?>
+                                <a href="marquer_lu.php?id=<?= $n['id_notif'] ?>&type=<?= $n['type'] ?>" class="dropdown-item" style="white-space: normal; border-bottom: 1px solid #f1f5f9; background: <?= $n['lu'] == 0 ? '#f8fafc' : 'white'; ?>; padding: 10px 15px;">
+                                    <div style="font-size: 12px; color: #64748b; margin-bottom: 3px;"><?= date('d/m/Y H:i', strtotime($n['date_creation'])) ?></div>
+                                    <div style="font-size: 13px; color: var(--text); font-weight: <?= $n['lu'] == 0 ? 'bold' : 'normal'; ?>;"><?= htmlspecialchars($n['message']) ?></div>
+                                </a>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
                 </div>
 
-                <!-- Dropdown affiché au clic -->
-                <div id="userDropdown" class="user-dropdown">
-                    <div class="dropdown-header">
-                        Connecté en tant que<br>
-                        <span style="color: var(--menu); font-weight: 600;"><?php echo htmlspecialchars($_SESSION['email'] ?? 'Enseignant'); ?></span>
+                <!-- Profil utilisateur cliquable (Style Admin Dashboard) -->
+                <div class="user-menu-container" onclick="toggleUserMenu(event)">
+                    <div class="user-profile">
+                        <span><strong><?php echo htmlspecialchars($prenom_prof . ' ' . $nom_prof); ?></strong></span>
+                        <div class="user-avatar"><?php echo strtoupper(substr($prenom_prof, 0, 1)); ?></div>
                     </div>
-                    <a href="modifier_infos.php" class="dropdown-item">✏️ Modifier mes informations</a>
-                    <a href="logout.php" class="dropdown-item logout">Se déconnecter</a>
+
+                    <div id="userDropdown" class="user-dropdown">
+                        <div class="dropdown-header">
+                            Connecté en tant que<br>
+                            <span style="color: var(--menu);"><?php echo htmlspecialchars($_SESSION['email'] ?? 'Enseignant'); ?></span>
+                        </div>
+                        <a href="modifier_infos.php" class="dropdown-item">✏️ Modifier mes informations</a>
+                        <a href="logout.php" class="dropdown-item logout">Se déconnecter</a>
+                    </div>
                 </div>
             </div>
 
@@ -378,33 +412,34 @@ $jours = ['Samedi', 'Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
         </div>
     </div>
 
-    <!-- Script JavaScript pour basculer l'affichage du menu et le fermer si on clique ailleurs -->
+    <!-- Script JavaScript -->
     <script>
-        function toggleSubmenu() {
-            var submenu = document.getElementById('submenuNotes');
-            var arrow = document.getElementById('arrow');
-            if (submenu && submenu.style.display === 'none' || (submenu && submenu.style.display === '')) {
-                submenu.style.display = 'flex';
-                if(arrow) arrow.textContent = '▴';
-            } else if(submenu) {
-                submenu.style.display = 'none';
-                if(arrow) arrow.textContent = '▾';
-            }
-        }
-
         function toggleUserMenu(event) {
             event.stopPropagation();
-            const dropdown = document.getElementById('userDropdown');
-            dropdown.classList.toggle('show');
+            var dropdown = document.getElementById('userDropdown');
+            dropdown.classList.toggle('active');
+            var notifDropdown = document.getElementById('notifDropdown');
+            if(notifDropdown) notifDropdown.classList.remove('active');
         }
 
-        // Fermer le menu si l'utilisateur clique en dehors
-        window.addEventListener('click', function() {
-            const dropdown = document.getElementById('userDropdown');
-            if (dropdown && dropdown.classList.contains('show')) {
-                dropdown.classList.remove('show');
+        function toggleNotifMenu(event) {
+            event.stopPropagation();
+            var dropdown = document.getElementById('notifDropdown');
+            dropdown.classList.toggle('active');
+            var userDropdown = document.getElementById('userDropdown');
+            if(userDropdown) userDropdown.classList.remove('active');
+        }
+
+        window.onclick = function(event) {
+            var userDropdown = document.getElementById('userDropdown');
+            if (userDropdown && userDropdown.classList.contains('active')) {
+                userDropdown.classList.remove('active');
             }
-        });
+            var notifDropdown = document.getElementById('notifDropdown');
+            if (notifDropdown && notifDropdown.classList.contains('active')) {
+                notifDropdown.classList.remove('active');
+            }
+        }
     </script>
 </body>
 </html>
