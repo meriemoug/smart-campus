@@ -283,7 +283,7 @@ $jours = ['Samedi', 'Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
             <!-- Profil utilisateur cliquable avec menu déroulant -->
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
-                    <span><strong><?php echo htmlspecialchars($prenom_prof . ' ' . $nom_prof); ?></strong></span>
+                    <span><strong><?php echo htmlspecialchars( $nom_prof . ' ' . $prenom_prof); ?></strong></span>
                     <div class="user-avatar"><?php echo strtoupper(substr($prenom_prof, 0, 1)); ?></div>
                 </div>
 
