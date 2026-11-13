@@ -403,7 +403,7 @@ try {
             cursor: pointer;
             text-decoration: none;
             display: inline-block;
-            margin-top:10px;
+            margin: 0;
         }
 
         .btn-delete {
@@ -416,7 +416,7 @@ try {
             font-weight: 600;
             cursor: pointer;
             transition: opacity 0.2s;
-            margin-top:10px;
+            margin: 0;
         }
 
         .btn-delete:hover {
@@ -427,12 +427,14 @@ try {
             width: 100%;
             border-collapse: collapse;
             font-size: 14px;
+            table-layout: fixed;
         }
 
         th, td {
-            padding: 12px;
+            padding: 12px 10px;
             text-align: left;
             border-bottom: 1px solid var(--border);
+            vertical-align: middle;
         }
 
         th {
@@ -627,32 +629,32 @@ try {
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>ID</th>
+                                     
                                         <th>Nom & Prénom</th>
                                         <th>Grade</th>
                                         <th>Département</th>
-                                        <th>Email</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php foreach ($professeurs as $prof): ?>
                                         <tr>
-                                            <td><strong><?php echo htmlspecialchars($prof['id_user']); ?></strong></td>
                                             <td><?php echo htmlspecialchars($prof['nom'] . ' ' . $prof['prenom']); ?></td>
                                             <td><?php echo htmlspecialchars($prof['grade']); ?></td>
                                             <td><?php echo htmlspecialchars($prof['Nom_Dep'] ?? 'Non rattaché'); ?></td>
-                                            <td><?php echo htmlspecialchars($prof['email']); ?></td>
-                                            <td style="display: flex; gap: 5px;">
-                                                <!-- Bouton de modification -->
-                                                <button type="button" class="btn-edit" onclick="ouvrirModalEdit('<?php echo $prof['id_user']; ?>', '<?php echo addslashes($prof['nom']); ?>', '<?php echo addslashes($prof['prenom']); ?>', '<?php echo addslashes($prof['email']); ?>', '<?php echo addslashes($prof['grade']); ?>', '<?php echo htmlspecialchars($prof['id_Dep'] ?? ''); ?>')">
-                                                    Modifier
-                                                </button>
+                                            <td style="vertical-align: middle;">
+                                                <div style="display: flex; align-items: center; gap: 6px;">
+                                                    <!-- Bouton Modifier -->
+                                                    <button type="button" class="btn-edit" style="margin: 0;" onclick="ouvrirModalEdit(...)">
+                                                        Modf
+                                                    </button>
 
-                                                <form action="gestion_profs.php" method="POST" onsubmit="return confirm('Voulez-vous vraiment supprimer ce professeur ?');" style="display:inline;">
-                                                    <input type="hidden" name="id_prof_to_delete" value="<?php echo htmlspecialchars($prof['id_user']); ?>">
-                                                    <button type="submit" name="supprimer_prof" class="btn-delete">Supprimer</button>
-                                                </form>
+                                                    <!-- Bouton Supprimer -->
+                                                    <form action="gestion_profs.php" method="POST" onsubmit="return confirm('Voulez-vous vraiment supprimer ce professeur ?');" style="display: inline; margin: 0;">
+                                                        <input type="hidden" name="id_prof_to_delete" value="<?php echo htmlspecialchars($prof['id_user']); ?>">
+                                                        <button type="submit" name="supprimer_prof" class="btn-delete" style="margin: 0;">Supp</button>
+                                                    </form>
+                                                </div>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
