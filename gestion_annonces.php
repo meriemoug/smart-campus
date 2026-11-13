@@ -14,9 +14,23 @@ $edit = null;
 $annonces = $recues = $sections = [];
 $search = trim($_GET['search'] ?? '');
 
+// Initialisation sécurisée des notifications
+$notifications = [];
+$nb_non_lus = 0;
+$id_user_connecte = $_SESSION['id_user'];
+
 try {
     $pdo = new PDO("mysql:host=localhost;dbname=smart_campus;charset=utf8mb4", 'root', '');
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    // Récupérer les notifications et le compteur non lus
+    $stmt_notifs = $pdo->prepare("SELECT * FROM notification WHERE id_user = ? ORDER BY date_creation DESC LIMIT 15");
+    $stmt_notifs->execute([$id_user_connecte]);
+    $notifications = $stmt_notifs->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmt_count = $pdo->prepare("SELECT COUNT(*) FROM notification WHERE id_user = ? AND lu = 0");
+    $stmt_count->execute([$id_user_connecte]);
+    $nb_non_lus = $stmt_count->fetchColumn();
 
     // ---- Ajout / modification ----
     if (isset($_POST['ajouter_annonce']) || isset($_POST['modifier_annonce'])) {
@@ -35,7 +49,40 @@ try {
         } elseif (isset($_POST['ajouter_annonce'])) {
             $st = $pdo->prepare("INSERT INTO annonce (id_user, titre, det, Date_Pub, cible, id_Sec) VALUES (?, ?, ?, CURDATE(), ?, ?)");
             $st->execute([$_SESSION['id_user'], $titre, $det, $cible, $id_sec]);
-            $message = "Annonce publiée avec succès.";
+
+            // --- NOTIFICATION : DIFFUSION DE L'ANNONCE AUX RÔLES CIBLES ---
+            $msg_notif = "Nouvelle annonce : " . $titre;
+            $stmt_notif = $pdo->prepare("INSERT INTO notification (id_user, type, message) VALUES (?, 'annonce', ?)");
+
+            $destinataires = [];
+            if ($cible === 'tous') {
+                $stmt_u = $pdo->prepare("SELECT id_user FROM user WHERE id_user <> ?");
+                $stmt_u->execute([$_SESSION['id_user']]);
+                $destinataires = $stmt_u->fetchAll(PDO::FETCH_COLUMN);
+            } elseif ($cible === 'etudiants') {
+                if (!empty($id_sec)) {
+                    $stmt_u = $pdo->prepare("SELECT u.id_user FROM user u JOIN etudiant e ON u.id_user = e.id_user WHERE e.id_Sec = ?");
+                    $stmt_u->execute([$id_sec]);
+                    $destinataires = $stmt_u->fetchAll(PDO::FETCH_COLUMN);
+                } else {
+                    $stmt_u = $pdo->query("SELECT id_user FROM etudiant");
+                    $destinataires = $stmt_u->fetchAll(PDO::FETCH_COLUMN);
+                }
+            } elseif ($cible === 'profs') {
+                $stmt_u = $pdo->query("SELECT id_user FROM prof");
+                $destinataires = $stmt_u->fetchAll(PDO::FETCH_COLUMN);
+            } elseif ($cible === 'scolarite') {
+                $stmt_u = $pdo->prepare("SELECT id_user FROM user WHERE role = ? AND id_user <> ?");
+                $stmt_u->execute(['scolarite', $_SESSION['id_user']]);
+                $destinataires = $stmt_u->fetchAll(PDO::FETCH_COLUMN);
+            }
+
+            foreach ($destinataires as $uid_dest) {
+                $stmt_notif->execute([$uid_dest, $msg_notif]);
+            }
+            // --- FIN NOTIFICATION ---
+
+            $message = "Annonce publiée et notifications envoyées avec succès.";
         } else {
             $st = $pdo->prepare("UPDATE annonce SET titre = ?, det = ?, cible = ?, id_Sec = ? WHERE id_Anm = ? AND id_user = ?");
             $st->execute([$titre, $det, $cible, $id_sec, (int)$_POST['id_anm'], $_SESSION['id_user']]);
@@ -410,7 +457,7 @@ try {
         }
 
         /* Style du profil utilisateur cliquable */
-        .user-menu-container { position: relative; display: inline-block; cursor: pointer; }
+        .user-menu-container, .notif-menu-container { position: relative; display: inline-block; cursor: pointer; }
         .user-profile { display: flex; align-items: center; gap: 12px; }
         .user-avatar { width: 38px; height: 38px; background-color: var(--accent); color: var(--on-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
         
@@ -534,60 +581,51 @@ try {
         <div class="top-navbar">
             <h2>Espace Scolarité - Gestion des Annonces</h2>
 
-                <?php
-// Récupérer les notifications non lues et la liste des notifications pour l'utilisateur connecté
-$id_user_connecte = $_SESSION['id_user'];
-$stmt_notifs = $pdo->prepare("SELECT * FROM notification WHERE id_user = ? ORDER BY date_creation DESC LIMIT 15");
-$stmt_notifs->execute([$id_user_connecte]);
-$notifications = $stmt_notifs->fetchAll(PDO::FETCH_ASSOC);
-
-$stmt_count = $pdo->prepare("SELECT COUNT(*) FROM notification WHERE id_user = ? AND lu = 0");
-$stmt_count->execute([$id_user_connecte]);
-$nb_non_lus = $stmt_count->fetchColumn();
-?>
-
-<!-- Conteneur des notifications -->
-<div class="notif-menu-container" onclick="toggleNotifMenu(event)" style="position: relative; cursor: pointer; margin-right: -160px;">
-    <div style="font-size: 20px; position: relative;">
-        🔔
-        <?php if ($nb_non_lus > 0): ?>
-            <span style="position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; background-color: #dc2626; border-radius: 50%; border: 2px solid var(--header);"></span>
-        <?php endif; ?>
-    </div>
-
-    <!-- Dropdown des notifications -->
-    <div id="notifDropdown" class="user-dropdown" style="width: 320px; max-height: 400px; overflow-y: auto; right: 0; left: auto;">
-        <div class="dropdown-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>Notifications</span>
-            <?php if ($nb_non_lus > 0): ?>
-                <span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 10px; font-size: 11px;"><?= $nb_non_lus ?> non lue(s)</span>
-            <?php endif; ?>
-        </div>
-        
-        <?php if (empty($notifications)): ?>
-            <div style="padding: 15px; text-align: center; color: #64748b; font-size: 13px;">Aucune notification pour le moment.</div>
-        <?php else: ?>
-            <?php foreach ($notifications as $n): ?>
-                <a href="marquer_lu.php?id=<?= $n['id_notif'] ?>&type=<?= $n['type'] ?>" class="dropdown-item" style="white-space: normal; border-bottom: 1px solid #f1f5f9; background: <?= $n['lu'] == 0 ? '#f8fafc' : 'white'; ?>; padding: 10px 15px;">
-                    <div style="font-size: 12px; color: #64748b; margin-bottom: 3px;"><?= date('d/m/Y H:i', strtotime($n['date_creation'])) ?></div>
-                    <div style="font-size: 13px; color: var(--text); font-weight: <?= $n['lu'] == 0 ? 'bold' : 'normal'; ?>;"><?= htmlspecialchars($n['message']) ?></div>
-                </a>
-            <?php endforeach; ?>
-        <?php endif; ?>
-    </div>
-</div>
-            <div class="user-menu-container" onclick="toggleUserMenu(event)">
-                <div class="user-profile">
-                    <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
-                    <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
-                </div>
-                <div id="userDropdown" class="user-dropdown">
-                    <div class="dropdown-header">
-                        Connecté en tant que<br>
-                        <span style="color: var(--menu);"><?php echo htmlspecialchars($_SESSION['email'] ?? 'Scolarité'); ?></span>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <!-- Conteneur des notifications -->
+                <div class="notif-menu-container" onclick="toggleNotifMenu(event)">
+                    <div style="font-size: 20px; position: relative;">
+                        🔔
+                        <?php if ($nb_non_lus > 0): ?>
+                            <span style="position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; background-color: #dc2626; border-radius: 50%; border: 2px solid var(--header);"></span>
+                        <?php endif; ?>
                     </div>
-                    <a href="modifier_infos.php" class="dropdown-item">✏️ Modifier mes informations</a>
-                    <a href="logout.php" class="dropdown-item logout">Se déconnecter</a>
+
+                    <!-- Dropdown des notifications -->
+                    <div id="notifDropdown" class="user-dropdown" style="width: 320px; max-height: 400px; overflow-y: auto; right: 0; left: auto;">
+                        <div class="dropdown-header" style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>Notifications</span>
+                            <?php if ($nb_non_lus > 0): ?>
+                                <span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 10px; font-size: 11px;"><?= $nb_non_lus ?> non lue(s)</span>
+                            <?php endif; ?>
+                        </div>
+                        
+                        <?php if (empty($notifications)): ?>
+                            <div style="padding: 15px; text-align: center; color: #64748b; font-size: 13px;">Aucune notification pour le moment.</div>
+                        <?php else: ?>
+                            <?php foreach ($notifications as $n): ?>
+                                <a href="marquer_lu.php?id=<?= $n['id_notif'] ?>&type=<?= $n['type'] ?>" class="dropdown-item" style="white-space: normal; border-bottom: 1px solid #f1f5f9; background: <?= $n['lu'] == 0 ? '#f8fafc' : 'white'; ?>; padding: 10px 15px;">
+                                    <div style="font-size: 12px; color: #64748b; margin-bottom: 3px;"><?= date('d/m/Y H:i', strtotime($n['date_creation'])) ?></div>
+                                    <div style="font-size: 13px; color: var(--text); font-weight: <?= $n['lu'] == 0 ? 'bold' : 'normal'; ?>;"><?= htmlspecialchars($n['message']) ?></div>
+                                </a>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <div class="user-menu-container" onclick="toggleUserMenu(event)">
+                    <div class="user-profile">
+                        <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
+                        <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
+                    </div>
+                    <div id="userDropdown" class="user-dropdown">
+                        <div class="dropdown-header">
+                            Connecté en tant que<br>
+                            <span style="color: var(--menu);"><?php echo htmlspecialchars($_SESSION['email'] ?? 'Scolarité'); ?></span>
+                        </div>
+                        <a href="modifier_infos.php" class="dropdown-item">✏️ Modifier mes informations</a>
+                        <a href="logout.php" class="dropdown-item logout">Se déconnecter</a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -710,37 +748,46 @@ $nb_non_lus = $stmt_count->fetchColumn();
     </div>
 
     <script>
-        function toggleUserMenu(event) { event.stopPropagation(); document.getElementById('userDropdown').classList.toggle('active'); }
-        window.onclick = function () { var d = document.getElementById('userDropdown'); if (d && d.classList.contains('active')) d.classList.remove('active'); };
+        function toggleUserMenu(event) { 
+            event.stopPropagation(); 
+            var dropdown = document.getElementById('userDropdown');
+            dropdown.classList.toggle('active');
+            var notifDropdown = document.getElementById('notifDropdown');
+            if (notifDropdown) notifDropdown.classList.remove('active');
+        }
+
+        function toggleNotifMenu(event) {
+            event.stopPropagation();
+            const notifDropdown = document.getElementById('notifDropdown');
+            notifDropdown.classList.toggle('active');
+            const userDropdown = document.getElementById('userDropdown');
+            if (userDropdown) userDropdown.classList.remove('active');
+        }
+
+        window.onclick = function() {
+            var userDropdown = document.getElementById('userDropdown');
+            if (userDropdown && userDropdown.classList.contains('active')) {
+                userDropdown.classList.remove('active');
+            }
+            const notifDropdown = document.getElementById('notifDropdown');
+            if (notifDropdown && notifDropdown.classList.contains('active')) {
+                notifDropdown.classList.remove('active');
+            }
+        };
+
         function toggleSubmenu() {
             var s = document.getElementById('submenuNotes'), a = document.getElementById('arrow');
             var ouvert = s.style.display === 'flex';
             s.style.display = ouvert ? 'none' : 'flex';
             a.textContent = ouvert ? '▾' : '▴';
         }
+
         // Une annonce destinée aux profs n'a pas de section
         function majSection() {
             var c = document.getElementById('cible'); if (!c) return;
             document.getElementById('blocSection').style.display = (c.value === 'etudiants') ? 'block' : 'none';
         }
         majSection();
-
-        function toggleNotifMenu(event) {
-    event.stopPropagation();
-    const dropdown = document.getElementById('notifDropdown');
-    dropdown.classList.toggle('active');
-    // Fermer l'autre menu utilisateur si ouvert
-    const userDropdown = document.getElementById('userDropdown');
-    if(userDropdown) userDropdown.classList.remove('active');
-}
-
-// Mettre à jour l'événement global de clic pour fermer le menu notif
-window.addEventListener('click', function() {
-    const notifDropdown = document.getElementById('notifDropdown');
-    if (notifDropdown && notifDropdown.classList.contains('active')) {
-        notifDropdown.classList.remove('active');
-    }
-});
     </script>
 </body>
 </html>

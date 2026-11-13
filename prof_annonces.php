@@ -52,7 +52,7 @@ try {
     ");
     $sections_uniques = $stmt_sections->fetchAll(PDO::FETCH_ASSOC);
 
-    // 1. Traitement de la Publication / Modification (avec Image)
+    // 1. Traitement de la Publication / Modification (avec Image et Notifications)
     if (isset($_POST['publier_annonce'])) {
         $titre = trim($_POST['titre'] ?? '');
         $det = trim($_POST['det'] ?? '');
@@ -126,7 +126,41 @@ try {
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 ");
                 $stmt_ins->execute([$id_user_session, $titre, $det, $date_pub, $cible, $id_Sec, $image_path]);
-                $message = "L'annonce a été publiée avec succès !";
+
+                // --- NOTIFICATION : DIFFUSION DE L'ANNONCE AUX RÔLES CIBLES ---
+                $msg_notif = "Nouvelle annonce : " . $titre;
+                $stmt_notif = $pdo->prepare("INSERT INTO notification (id_user, type, message) VALUES (?, 'annonce', ?)");
+
+                $destinataires = [];
+                if ($cible === 'tous') {
+                    $stmt_u = $pdo->prepare("SELECT id_user FROM user WHERE id_user <> ?");
+                    $stmt_u->execute([$id_user_session]);
+                    $destinataires = $stmt_u->fetchAll(PDO::FETCH_COLUMN);
+                } elseif ($cible === 'etudiants') {
+                    if (!empty($id_Sec)) {
+                        $stmt_u = $pdo->prepare("SELECT u.id_user FROM user u JOIN etudiant e ON u.id_user = e.id_user WHERE e.id_Sec = ?");
+                        $stmt_u->execute([$id_Sec]);
+                        $destinataires = $stmt_u->fetchAll(PDO::FETCH_COLUMN);
+                    } else {
+                        $stmt_u = $pdo->query("SELECT u.id_user FROM user u JOIN etudiant e ON u.id_user = e.id_user");
+                        $destinataires = $stmt_u->fetchAll(PDO::FETCH_COLUMN);
+                    }
+                } elseif ($cible === 'profs') {
+                    $stmt_u = $pdo->prepare("SELECT u.id_user FROM user u JOIN prof p ON u.id_user = p.id_user WHERE u.id_user <> ?");
+                    $stmt_u->execute([$id_user_session]);
+                    $destinataires = $stmt_u->fetchAll(PDO::FETCH_COLUMN);
+                } elseif ($cible === 'scolarite') {
+                    $stmt_u = $pdo->prepare("SELECT id_user FROM user WHERE role = ? AND id_user <> ?");
+                    $stmt_u->execute(['scolarite', $id_user_session]);
+                    $destinataires = $stmt_u->fetchAll(PDO::FETCH_COLUMN);
+                }
+
+                foreach ($destinataires as $uid_dest) {
+                    $stmt_notif->execute([$uid_dest, $msg_notif]);
+                }
+                // --- FIN NOTIFICATION ---
+
+                $message = "L'annonce a été publiée et les utilisateurs concernés ont été notifiés avec succès !";
             }
             $tab = 'mes_annonces';
         }

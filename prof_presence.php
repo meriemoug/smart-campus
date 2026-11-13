@@ -144,12 +144,42 @@ try {
                 VALUES (?, ?, ?, ?)
             ");
 
+            $absents_ids = [];
             foreach ($presences as $id_Etu => $presence) {
                 $justification = ($presence === 'absent') ? ($justifications[$id_Etu] ?? 'non_justifiee') : 'non_justifiee';
                 $stmt_ins_g->execute([$id_liste, $id_Etu, $presence, $justification]);
+
+                if ($presence === 'absent') {
+                    $absents_ids[] = $id_Etu;
+                }
             }
 
-            $message = "La liste de présence a été enregistrée avec succès !";
+            // --- NOTIFICATION : ENVOI AUX ÉTUDIANTS MARQUÉS ABSENTS ---
+            if (!empty($absents_ids)) {
+                $stmt_m_info = $pdo->prepare("
+                    SELECT m.nom_mod 
+                    FROM seance s 
+                    JOIN module m ON s.id_mod = m.id_mod 
+                    WHERE s.id_Seance = ?
+                ");
+                $stmt_m_info->execute([$id_Seance]);
+                $mod_nom = $stmt_m_info->fetchColumn();
+
+                $placeholders = implode(',', array_fill(0, count($absents_ids), '?'));
+                $stmt_u_abs = $pdo->prepare("SELECT id_user FROM etudiant WHERE id_Etu IN ($placeholders)");
+                $stmt_u_abs->execute($absents_ids);
+                $users_absents = $stmt_u_abs->fetchAll(PDO::FETCH_COLUMN);
+
+                $msg_absence = "Vous avez été marqué(e) absent(e) pour le module : $mod_nom (Date : " . date('d/m/Y', strtotime($date_appel)) . ").";
+                $stmt_notif = $pdo->prepare("INSERT INTO notification (id_user, type, message) VALUES (?, 'absence', ?)");
+                
+                foreach ($users_absents as $uid_etu) {
+                    $stmt_notif->execute([$uid_etu, $msg_absence]);
+                }
+            }
+            // --- FIN NOTIFICATION ---
+
+            $message = "La liste de présence a été enregistrée et les étudiants absents ont été notifiés avec succès !";
             $tab = 'consulter';
         }
     }

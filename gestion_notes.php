@@ -20,9 +20,23 @@ $annee_academique = $_GET['annee_academique'] ?? $_POST['annee_academique'] ?? '
 $nom_section = '';
 $nom_specialite = '';
 
+// Initialisation sécurisée des variables de notification
+$notifications = [];
+$nb_non_lus = 0;
+$id_user_connecte = $_SESSION['id_user'];
+
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    // Récupérer les notifications et le compteur non lus dès le début
+    $stmt_notifs = $pdo->prepare("SELECT * FROM notification WHERE id_user = ? ORDER BY date_creation DESC LIMIT 15");
+    $stmt_notifs->execute([$id_user_connecte]);
+    $notifications = $stmt_notifs->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmt_count = $pdo->prepare("SELECT COUNT(*) FROM notification WHERE id_user = ? AND lu = 0");
+    $stmt_count->execute([$id_user_connecte]);
+    $nb_non_lus = $stmt_count->fetchColumn();
 
     // 1. Récupérer toutes les spécialités
     $stmt_specs = $pdo->query("SELECT id_sp, NomSp, annee FROM specialite ORDER BY NomSp ASC");
@@ -69,7 +83,6 @@ try {
         $nouvelle_annee_acad = ($annee_actuelle_debut + 1) . '/' . ($annee_actuelle_debut + 2);
 
         if (!empty($nouvelle_section_cible) && !empty($sec_info)) {
-            // Récupérer les infos de la section cible
             $stmt_cible_info = $pdo->prepare("
                 SELECT sec.id_Sec, sec.id_sp, sp.annee AS niveau_cible, sp.NomSp 
                 FROM section sec 
@@ -84,9 +97,7 @@ try {
                 $niveau_actuel = intval($sec_info['annee'] ?? 1);
                 $niveau_cible = intval($cible_info['niveau_cible'] ?? 1);
 
-                // Vérification que le niveau cible est strictement supérieur au niveau actuel
                 if ($niveau_cible > $niveau_actuel) {
-                    // Récupérer UNIQUEMENT les étudiants dont la décision est STRICTEMENT 'Admis'
                     $stmt_admis = $pdo->prepare("
                         SELECT e.id_user 
                         FROM etudiant e
@@ -103,7 +114,6 @@ try {
                         $pdo->beginTransaction();
 
                         foreach ($admis_list as $id_user) {
-                            // A. Mettre à jour la section, la spécialité et l'année dans la table etudiant
                             $stmt_update_etu = $pdo->prepare("
                                 UPDATE etudiant 
                                 SET id_Sec = ?, id_sp = ?, annee = ? 
@@ -111,7 +121,6 @@ try {
                             ");
                             $stmt_update_etu->execute([$nouvelle_section_cible, $id_sp_cible, $niveau_cible, $id_user]);
 
-                            // B. Créer une nouvelle ligne de résultat vierge pour la nouvelle année académique et la nouvelle section
                             $stmt_insert_res = $pdo->prepare("
                                 INSERT INTO resultat_etudiant (id_user, annee_academique, id_sp, id_Sec, decision) 
                                 VALUES (?, ?, ?, ?, 'En cours')
@@ -135,14 +144,13 @@ try {
         }
     }
 
-    // 4. Traitement du calcul & attribution des moyennes S1, S2, Finale et de la Décision
+    // 4. Traitement du calcul & attribution des moyennes S1, S2, Finale, de la Décision et Notification
     if (isset($_POST['calculer_section']) && !empty($selected_section)) {
         
         $stmt_etus_sec = $pdo->prepare("SELECT id_Etu, id_user, id_sp FROM etudiant WHERE id_Sec = ?");
         $stmt_etus_sec->execute([$selected_section]);
         $etudiants_section = $stmt_etus_sec->fetchAll(PDO::FETCH_ASSOC);
 
-        // Fonction de calcul de moyenne semestrielle filtrée par spécialité
         $calculerMoyenneSemestre = function($pdo, $id_etudiant, $id_sp_etudiant, $semestre_num) {
             $stmt_notes = $pdo->prepare("
                 SELECT n.Exam, n.TD, n.TP, p.coefficient 
@@ -163,7 +171,7 @@ try {
                 $coef = floatval($mod['coefficient']);
 
                 if ($exam === null && $td === null && $tp === null) {
-                    continue; // Ignorer les modules sans notes
+                    continue;
                 }
 
                 $exam_val = ($exam !== null) ? floatval($exam) : 0;
@@ -196,7 +204,6 @@ try {
             $moyenne_s1 = $calculerMoyenneSemestre($pdo, $id_etudiant, $id_sp_etudiant, 1);
             $moyenne_s2 = $calculerMoyenneSemestre($pdo, $id_etudiant, $id_sp_etudiant, 2);
 
-            // Récupérer les rattrapages éventuels saisis pour cette année
             $stmt_rat = $pdo->prepare("SELECT rattrapage_s1, rattrapage_s2 FROM resultat_etudiant WHERE id_user = ? AND annee_academique = ? AND id_Sec = ?");
             $stmt_rat->execute([$id_user, $annee_academique, $selected_section]);
             $rat_data = $stmt_rat->fetch(PDO::FETCH_ASSOC);
@@ -219,7 +226,6 @@ try {
                 $moyenne_finale = $eff_s2;
             }
 
-            // Insertion ou Mise à jour (UPSERT) dans resultat_etudiant pour l'année académique et la section courante
             $stmt_check = $pdo->prepare("SELECT id_resultat FROM resultat_etudiant WHERE id_user = ? AND annee_academique = ? AND id_Sec = ?");
             $stmt_check->execute([$id_user, $annee_academique, $selected_section]);
 
@@ -238,7 +244,14 @@ try {
                 $stmt_ins->execute([$id_user, $annee_academique, $id_sp_etudiant, $selected_section, $moyenne_s1, $moyenne_s2, $moyenne_finale, $decision]);
             }
 
-            // --- Archivage du détail des modules pour cette année académique ---
+            // --- NOTIFICATION : VALIDATION DES MOYENNES ---
+            $moy_finale_texte = ($moyenne_finale !== null) ? number_format($moyenne_finale, 2) : 'N/A';
+            $msg_notif = "Vos moyennes et résultats pour l'année académique $annee_academique ont été validés. Décision : $decision (Moyenne finale : $moy_finale_texte).";
+            
+            $stmt_notif = $pdo->prepare("INSERT INTO notification (id_user, type, message) VALUES (?, 'note', ?)");
+            $stmt_notif->execute([$id_user, $msg_notif]);
+            // --- FIN NOTIFICATION ---
+
             $stmt_mods = $pdo->prepare("
                 SELECT p.id_mod, p.semestre, p.coefficient, m.Nom_mod, n.TD, n.TP, n.Exam
                 FROM programme p
@@ -272,7 +285,7 @@ try {
                                      $mod_arch['semestre'], $mod_arch['coefficient'], $a_td, $a_tp, $a_ex, $a_moy]);
             }
         }
-        $message = "Les moyennes, la moyenne finale et les décisions ont été calculées et enregistrées avec succès !";
+        $message = "Les moyennes, la moyenne finale et les décisions ont été calculées, enregistrées et notifiées aux étudiants avec succès !";
     }
 
     // 5. Récupérer les résultats pour l'affichage du tableau filtré par année académique et section exacte
@@ -363,7 +376,7 @@ try {
         
         .section-info-badge { font-size: 14px; font-weight: normal; color: #51606A; background: #f1f5f9; padding: 4px 10px; border-radius: 4px; }
 
-        .user-menu-container { position: relative; display: inline-block; cursor: pointer; }
+        .user-menu-container, .notif-menu-container { position: relative; display: inline-block; cursor: pointer; }
         .user-profile { display: flex; align-items: center; gap: 12px; }
         .user-avatar { width: 38px; height: 38px; background-color: var(--accent); color: var(--on-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
         
@@ -424,65 +437,54 @@ try {
         <div class="top-navbar">
             <h2>Espace Scolarité - Notes et Moyennes</h2>
 
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <!-- Conteneur des notifications -->
+                <div class="notif-menu-container" onclick="toggleNotifMenu(event)">
+                    <div style="font-size: 20px; position: relative;">
+                        🔔
+                        <?php if ($nb_non_lus > 0): ?>
+                            <span style="position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; background-color: #dc2626; border-radius: 50%; border: 2px solid var(--header);"></span>
+                        <?php endif; ?>
+                    </div>
 
-                <?php
-// Récupérer les notifications non lues et la liste des notifications pour l'utilisateur connecté
-$id_user_connecte = $_SESSION['id_user'];
-$stmt_notifs = $pdo->prepare("SELECT * FROM notification WHERE id_user = ? ORDER BY date_creation DESC LIMIT 15");
-$stmt_notifs->execute([$id_user_connecte]);
-$notifications = $stmt_notifs->fetchAll(PDO::FETCH_ASSOC);
-
-$stmt_count = $pdo->prepare("SELECT COUNT(*) FROM notification WHERE id_user = ? AND lu = 0");
-$stmt_count->execute([$id_user_connecte]);
-$nb_non_lus = $stmt_count->fetchColumn();
-?>
-
-<!-- Conteneur des notifications -->
-<div class="notif-menu-container" onclick="toggleNotifMenu(event)" style="position: relative; cursor: pointer; margin-right: -160px;">
-    <div style="font-size: 20px; position: relative;">
-        🔔
-        <?php if ($nb_non_lus > 0): ?>
-            <span style="position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; background-color: #dc2626; border-radius: 50%; border: 2px solid var(--header);"></span>
-        <?php endif; ?>
-    </div>
-
-    <!-- Dropdown des notifications -->
-    <div id="notifDropdown" class="user-dropdown" style="width: 320px; max-height: 400px; overflow-y: auto; right: 0; left: auto;">
-        <div class="dropdown-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>Notifications</span>
-            <?php if ($nb_non_lus > 0): ?>
-                <span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 10px; font-size: 11px;"><?= $nb_non_lus ?> non lue(s)</span>
-            <?php endif; ?>
-        </div>
-        
-        <?php if (empty($notifications)): ?>
-            <div style="padding: 15px; text-align: center; color: #64748b; font-size: 13px;">Aucune notification pour le moment.</div>
-        <?php else: ?>
-            <?php foreach ($notifications as $n): ?>
-                <a href="marquer_lu.php?id=<?= $n['id_notif'] ?>&type=<?= $n['type'] ?>" class="dropdown-item" style="white-space: normal; border-bottom: 1px solid #f1f5f9; background: <?= $n['lu'] == 0 ? '#f8fafc' : 'white'; ?>; padding: 10px 15px;">
-                    <div style="font-size: 12px; color: #64748b; margin-bottom: 3px;"><?= date('d/m/Y H:i', strtotime($n['date_creation'])) ?></div>
-                    <div style="font-size: 13px; color: var(--text); font-weight: <?= $n['lu'] == 0 ? 'bold' : 'normal'; ?>;"><?= htmlspecialchars($n['message']) ?></div>
-                </a>
-            <?php endforeach; ?>
-        <?php endif; ?>
-    </div>
-</div>
-
-            <!-- Profil utilisateur cliquable avec menu déroulant -->
-            <div class="user-menu-container" onclick="toggleUserMenu(event)">
-                <div class="user-profile">
-                    <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
-                    <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
+                    <!-- Dropdown des notifications -->
+                    <div id="notifDropdown" class="user-dropdown" style="width: 320px; max-height: 400px; overflow-y: auto; right: 0; left: auto;">
+                        <div class="dropdown-header" style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>Notifications</span>
+                            <?php if ($nb_non_lus > 0): ?>
+                                <span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 10px; font-size: 11px;"><?= $nb_non_lus ?> non lue(s)</span>
+                            <?php endif; ?>
+                        </div>
+                        
+                        <?php if (empty($notifications)): ?>
+                            <div style="padding: 15px; text-align: center; color: #64748b; font-size: 13px;">Aucune notification pour le moment.</div>
+                        <?php else: ?>
+                            <?php foreach ($notifications as $n): ?>
+                                <a href="marquer_lu.php?id=<?= $n['id_notif'] ?>&type=<?= $n['type'] ?>" class="dropdown-item" style="white-space: normal; border-bottom: 1px solid #f1f5f9; background: <?= $n['lu'] == 0 ? '#f8fafc' : 'white'; ?>; padding: 10px 15px;">
+                                    <div style="font-size: 12px; color: #64748b; margin-bottom: 3px;"><?= date('d/m/Y H:i', strtotime($n['date_creation'])) ?></div>
+                                    <div style="font-size: 13px; color: var(--text); font-weight: <?= $n['lu'] == 0 ? 'bold' : 'normal'; ?>;"><?= htmlspecialchars($n['message']) ?></div>
+                                </a>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
                 </div>
 
-                <!-- Dropdown affiché au clic -->
-                <div id="userDropdown" class="user-dropdown">
-                    <div class="dropdown-header">
-                        Connecté en tant que<br>
-                        <span style="color: var(--menu);"><?php echo htmlspecialchars($_SESSION['email'] ?? 'Scolarité'); ?></span>
+                <!-- Profil utilisateur cliquable avec menu déroulant -->
+                <div class="user-menu-container" onclick="toggleUserMenu(event)">
+                    <div class="user-profile">
+                        <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
+                        <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
                     </div>
-                    <a href="modifier_infos.php" class="dropdown-item">✏️ Modifier mes informations</a>
-                    <a href="logout.php" class="dropdown-item logout">Se déconnecter</a>
+
+                    <!-- Dropdown affiché au clic -->
+                    <div id="userDropdown" class="user-dropdown">
+                        <div class="dropdown-header">
+                            Connecté en tant que<br>
+                            <span style="color: var(--menu);"><?php echo htmlspecialchars($_SESSION['email'] ?? 'Scolarité'); ?></span>
+                        </div>
+                        <a href="modifier_infos.php" class="dropdown-item">✏️ Modifier mes informations</a>
+                        <a href="logout.php" class="dropdown-item logout">Se déconnecter</a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -637,31 +639,28 @@ $nb_non_lus = $stmt_count->fetchColumn();
           event.stopPropagation();
           var dropdown = document.getElementById('userDropdown');
           dropdown.classList.toggle('active');
-      }
-
-      window.onclick = function(event) {
-          var dropdown = document.getElementById('userDropdown');
-          if (dropdown && dropdown.classList.contains('active')) {
-              dropdown.classList.remove('active');
-          }
+          var notifDropdown = document.getElementById('notifDropdown');
+          if (notifDropdown) notifDropdown.classList.remove('active');
       }
 
       function toggleNotifMenu(event) {
-    event.stopPropagation();
-    const dropdown = document.getElementById('notifDropdown');
-    dropdown.classList.toggle('active');
-    // Fermer l'autre menu utilisateur si ouvert
-    const userDropdown = document.getElementById('userDropdown');
-    if(userDropdown) userDropdown.classList.remove('active');
-}
+          event.stopPropagation();
+          var notifDropdown = document.getElementById('notifDropdown');
+          notifDropdown.classList.toggle('active');
+          var userDropdown = document.getElementById('userDropdown');
+          if (userDropdown) userDropdown.classList.remove('active');
+      }
 
-// Mettre à jour l'événement global de clic pour fermer le menu notif
-window.addEventListener('click', function() {
-    const notifDropdown = document.getElementById('notifDropdown');
-    if (notifDropdown && notifDropdown.classList.contains('active')) {
-        notifDropdown.classList.remove('active');
-    }
-});
+      window.onclick = function(event) {
+          var userDropdown = document.getElementById('userDropdown');
+          if (userDropdown && userDropdown.classList.contains('active')) {
+              userDropdown.classList.remove('active');
+          }
+          var notifDropdown = document.getElementById('notifDropdown');
+          if (notifDropdown && notifDropdown.classList.contains('active')) {
+              notifDropdown.classList.remove('active');
+          }
+      }
     </script>
 </body>
 </html>

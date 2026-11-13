@@ -15,10 +15,20 @@ $message = '';
 $error = '';
 $tous_examens = [];
 $toutes_seances = [];
+$id_user_connecte = $_SESSION['id_user'];
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    // Récupérer les notifications et le compteur non lus pour l'affichage de la cloche
+    $stmt_notifs = $pdo->prepare("SELECT * FROM notification WHERE id_user = ? ORDER BY date_creation DESC LIMIT 15");
+    $stmt_notifs->execute([$id_user_connecte]);
+    $notifications = $stmt_notifs->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmt_count = $pdo->prepare("SELECT COUNT(*) FROM notification WHERE id_user = ? AND lu = 0");
+    $stmt_count->execute([$id_user_connecte]);
+    $nb_non_lus = $stmt_count->fetchColumn();
 
     // 1. Enregistrement ou mise à jour de l'examen avec vérification complète des conflits (Salle, Section, Professeur)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enregistrer_examen'])) {
@@ -86,6 +96,43 @@ try {
                                            id_prof = VALUES(id_prof), id_salle = VALUES(id_salle), type_exam = VALUES(type_exam), 
                                            dateEx = VALUES(dateEx), heurD = VALUES(heurD), heurF = VALUES(heurF)");
                 $stmt_ins->execute([$id_mod, $id_sec, $id_prof, $id_salle, $type_exam, $dateEx, $heurD, $heurF]);
+
+                // --- NOTIFICATION : EXAMEN PROGRAMMÉ / MODIFIÉ ---
+                $stmt_m_info = $pdo->prepare("SELECT Nom_mod FROM module WHERE id_mod = ?");
+                $stmt_m_info->execute([$id_mod]);
+                $mod_nom = $stmt_m_info->fetchColumn();
+
+                $stmt_sec_name = $pdo->prepare("SELECT nom_sec FROM section WHERE id_Sec = ?");
+                $stmt_sec_name->execute([$id_sec]);
+                $sec_nom = $stmt_sec_name->fetchColumn();
+
+                $date_formatee = date('d/m/Y', strtotime($dateEx));
+                $horaire_formate = substr($heurD, 0, 5) . ' - ' . substr($heurF, 0, 5);
+
+                // 1. Notifier les étudiants de la section
+                $stmt_etu = $pdo->prepare("SELECT u.id_user FROM user u JOIN etudiant e ON u.id_user = e.id_user WHERE e.id_Sec = ?");
+                $stmt_etu->execute([$id_sec]);
+                $etudiants_users = $stmt_etu->fetchAll(PDO::FETCH_COLUMN);
+
+                $msg_etu = "Examen programmé : $mod_nom ($type_exam) le $date_formatee de $horaire_formate.";
+                $stmt_notif = $pdo->prepare("INSERT INTO notification (id_user, type, message) VALUES (?, 'examen', ?)");
+                foreach ($etudiants_users as $uid_etu) {
+                    $stmt_notif->execute([$uid_etu, $msg_etu]);
+                }
+
+                // 2. Notifier le professeur assigné
+                if (!empty($id_prof)) {
+                    $stmt_p_user = $pdo->prepare("SELECT id_user FROM prof WHERE id_prof = ?");
+                    $stmt_p_user->execute([$id_prof]);
+                    $prof_user_id = $stmt_p_user->fetchColumn();
+
+                    if ($prof_user_id) {
+                        $msg_prof = "Surveillance / Examen programmé : $mod_nom ($type_exam) pour la section $sec_nom le $date_formatee de $horaire_formate.";
+                        $stmt_notif->execute([$prof_user_id, $msg_prof]);
+                    }
+                }
+                // --- FIN NOTIFICATION ---
+
                 $message = "Planning de l'examen enregistré avec succès !";
             }
         } else {
@@ -93,11 +140,52 @@ try {
         }
     }
 
-    // 2. Suppression d'un examen programmé
+    // 2. Suppression d'un examen programmé (AVEC NOTIFICATIONS)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_examen'])) {
         $id_exam_del = intval($_POST['id_exam_to_delete'] ?? 0);
-        $pdo->prepare("DELETE FROM exam WHERE id_exam = ?")->execute([$id_exam_del]);
-        $message = "L'examen a été retiré du planning.";
+        
+        if ($id_exam_del > 0) {
+            $stmt_info_del = $pdo->prepare("
+                SELECT ex.*, m.Nom_mod, sec.nom_sec 
+                FROM exam ex 
+                JOIN module m ON ex.id_mod = m.id_mod 
+                JOIN section sec ON ex.id_sec = sec.id_Sec 
+                WHERE ex.id_exam = ?
+            ");
+            $stmt_info_del->execute([$id_exam_del]);
+            $ex_info = $stmt_info_del->fetch(PDO::FETCH_ASSOC);
+
+            if ($ex_info) {
+                $date_formatee = date('d/m/Y', strtotime($ex_info['dateEx']));
+                $horaire_formate = substr($ex_info['heurD'], 0, 5) . ' - ' . substr($ex_info['heurF'], 0, 5);
+
+                // 1. Notifier les étudiants de la section
+                $stmt_etu = $pdo->prepare("SELECT u.id_user FROM user u JOIN etudiant e ON u.id_user = e.id_user WHERE e.id_Sec = ?");
+                $stmt_etu->execute([$ex_info['id_sec']]);
+                $etudiants_users = $stmt_etu->fetchAll(PDO::FETCH_COLUMN);
+
+                $msg_etu = "Examen annulé : {$ex_info['Nom_mod']} ({$ex_info['type_exam']}) prévu le $date_formatee de $horaire_formate.";
+                $stmt_notif = $pdo->prepare("INSERT INTO notification (id_user, type, message) VALUES (?, 'examen', ?)");
+                foreach ($etudiants_users as $uid_etu) {
+                    $stmt_notif->execute([$uid_etu, $msg_etu]);
+                }
+
+                // 2. Notifier le professeur concerné
+                if (!empty($ex_info['id_prof'])) {
+                    $stmt_p_user = $pdo->prepare("SELECT id_user FROM prof WHERE id_prof = ?");
+                    $stmt_p_user->execute([$ex_info['id_prof']]);
+                    $prof_user_id = $stmt_p_user->fetchColumn();
+
+                    if ($prof_user_id) {
+                        $msg_prof = "Examen annulé : {$ex_info['Nom_mod']} ({$ex_info['type_exam']}) pour la section {$ex_info['nom_sec']} prévu le $date_formatee de $horaire_formate.";
+                        $stmt_notif->execute([$prof_user_id, $msg_prof]);
+                    }
+                }
+            }
+
+            $pdo->prepare("DELETE FROM exam WHERE id_exam = ?")->execute([$id_exam_del]);
+            $message = "L'examen a été retiré du planning.";
+        }
     }
 
     // Récupération globale pour les vérifications et listes déroulantes
@@ -120,12 +208,14 @@ try {
         $selected_section = $stmt_sel->fetch(PDO::FETCH_ASSOC);
 
         if ($selected_section) {
+            // CORRECTION ICI : Ajout de 'AND e.id_Sec = ?' et 'GROUP BY m.id_mod' pour éviter les doublons de modules
             $stmt_mods = $pdo->prepare("SELECT m.id_mod, m.Nom_mod, p.semestre, p.coefficient, e.id_prof 
                                        FROM programme p 
                                        JOIN module m ON p.id_mod = m.id_mod 
-                                       LEFT JOIN enseignement e ON m.id_mod = e.id_mod
-                                       WHERE p.id_sp = ?");
-            $stmt_mods->execute([$selected_section['id_sp']]);
+                                       LEFT JOIN enseignement e ON m.id_mod = e.id_mod AND e.id_Sec = ?
+                                       WHERE p.id_sp = ?
+                                       GROUP BY m.id_mod");
+            $stmt_mods->execute([$selected_section['id_Sec'], $selected_section['id_sp']]);
             $modules_section = $stmt_mods->fetchAll(PDO::FETCH_ASSOC);
 
             $stmt_exams = $pdo->prepare("SELECT e.*, m.Nom_mod, sal.nom_salle, u.nom as prof_nom, u.prenom as prof_prenom 
@@ -273,48 +363,36 @@ try {
         <div class="top-navbar">
             <h2>Espace Scolarité - Gestion des Examens</h2>
 
-                <?php
-// Récupérer les notifications non lues et la liste des notifications pour l'utilisateur connecté
-$id_user_connecte = $_SESSION['id_user'];
-$stmt_notifs = $pdo->prepare("SELECT * FROM notification WHERE id_user = ? ORDER BY date_creation DESC LIMIT 15");
-$stmt_notifs->execute([$id_user_connecte]);
-$notifications = $stmt_notifs->fetchAll(PDO::FETCH_ASSOC);
+            <!-- Conteneur des notifications -->
+            <div class="notif-menu-container" onclick="toggleNotifMenu(event)" style="position: relative; cursor: pointer; margin-right: -160px;">
+                <div style="font-size: 20px; position: relative;">
+                    🔔
+                    <?php if ($nb_non_lus > 0): ?>
+                        <span style="position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; background-color: #dc2626; border-radius: 50%; border: 2px solid var(--header);"></span>
+                    <?php endif; ?>
+                </div>
 
-$stmt_count = $pdo->prepare("SELECT COUNT(*) FROM notification WHERE id_user = ? AND lu = 0");
-$stmt_count->execute([$id_user_connecte]);
-$nb_non_lus = $stmt_count->fetchColumn();
-?>
-
-<!-- Conteneur des notifications -->
-<div class="notif-menu-container" onclick="toggleNotifMenu(event)" style="position: relative; cursor: pointer; margin-right: -160px;">
-    <div style="font-size: 20px; position: relative;">
-        🔔
-        <?php if ($nb_non_lus > 0): ?>
-            <span style="position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; background-color: #dc2626; border-radius: 50%; border: 2px solid var(--header);"></span>
-        <?php endif; ?>
-    </div>
-
-    <!-- Dropdown des notifications -->
-    <div id="notifDropdown" class="user-dropdown" style="width: 320px; max-height: 400px; overflow-y: auto; right: 0; left: auto;">
-        <div class="dropdown-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>Notifications</span>
-            <?php if ($nb_non_lus > 0): ?>
-                <span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 10px; font-size: 11px;"><?= $nb_non_lus ?> non lue(s)</span>
-            <?php endif; ?>
-        </div>
-        
-        <?php if (empty($notifications)): ?>
-            <div style="padding: 15px; text-align: center; color: #64748b; font-size: 13px;">Aucune notification pour le moment.</div>
-        <?php else: ?>
-            <?php foreach ($notifications as $n): ?>
-                <a href="marquer_lu.php?id=<?= $n['id_notif'] ?>&type=<?= $n['type'] ?>" class="dropdown-item" style="white-space: normal; border-bottom: 1px solid #f1f5f9; background: <?= $n['lu'] == 0 ? '#f8fafc' : 'white'; ?>; padding: 10px 15px;">
-                    <div style="font-size: 12px; color: #64748b; margin-bottom: 3px;"><?= date('d/m/Y H:i', strtotime($n['date_creation'])) ?></div>
-                    <div style="font-size: 13px; color: var(--text); font-weight: <?= $n['lu'] == 0 ? 'bold' : 'normal'; ?>;"><?= htmlspecialchars($n['message']) ?></div>
-                </a>
-            <?php endforeach; ?>
-        <?php endif; ?>
-    </div>
-</div>
+                <!-- Dropdown des notifications -->
+                <div id="notifDropdown" class="user-dropdown" style="width: 320px; max-height: 400px; overflow-y: auto; right: 0; left: auto;">
+                    <div class="dropdown-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>Notifications</span>
+                        <?php if ($nb_non_lus > 0): ?>
+                            <span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 10px; font-size: 11px;"><?= $nb_non_lus ?> non lue(s)</span>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <?php if (empty($notifications)): ?>
+                        <div style="padding: 15px; text-align: center; color: #64748b; font-size: 13px;">Aucune notification pour le moment.</div>
+                    <?php else: ?>
+                        <?php foreach ($notifications as $n): ?>
+                            <a href="marquer_lu.php?id=<?= $n['id_notif'] ?>&type=<?= $n['type'] ?>" class="dropdown-item" style="white-space: normal; border-bottom: 1px solid #f1f5f9; background: <?= $n['lu'] == 0 ? '#f8fafc' : 'white'; ?>; padding: 10px 15px;">
+                                <div style="font-size: 12px; color: #64748b; margin-bottom: 3px;"><?= date('d/m/Y H:i', strtotime($n['date_creation'])) ?></div>
+                                <div style="font-size: 13px; color: var(--text); font-weight: <?= $n['lu'] == 0 ? 'bold' : 'normal'; ?>;"><?= htmlspecialchars($n['message']) ?></div>
+                            </a>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
             
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
@@ -583,10 +661,22 @@ $nb_non_lus = $stmt_count->fetchColumn();
             dropdown.classList.toggle('active');
         }
 
+        function toggleNotifMenu(event) {
+            event.stopPropagation();
+            const dropdown = document.getElementById('notifDropdown');
+            dropdown.classList.toggle('active');
+            const userDropdown = document.getElementById('userDropdown');
+            if(userDropdown) userDropdown.classList.remove('active');
+        }
+
         window.onclick = function(event) {
             var dropdown = document.getElementById('userDropdown');
             if (dropdown && dropdown.classList.contains('active')) {
                 dropdown.classList.remove('active');
+            }
+            const notifDropdown = document.getElementById('notifDropdown');
+            if (notifDropdown && notifDropdown.classList.contains('active')) {
+                notifDropdown.classList.remove('active');
             }
         }
 
@@ -602,22 +692,6 @@ $nb_non_lus = $stmt_count->fetchColumn();
                 arrow.textContent = '▾';
             }
         }
-        function toggleNotifMenu(event) {
-    event.stopPropagation();
-    const dropdown = document.getElementById('notifDropdown');
-    dropdown.classList.toggle('active');
-    // Fermer l'autre menu utilisateur si ouvert
-    const userDropdown = document.getElementById('userDropdown');
-    if(userDropdown) userDropdown.classList.remove('active');
-}
-
-// Mettre à jour l'événement global de clic pour fermer le menu notif
-window.addEventListener('click', function() {
-    const notifDropdown = document.getElementById('notifDropdown');
-    if (notifDropdown && notifDropdown.classList.contains('active')) {
-        notifDropdown.classList.remove('active');
-    }
-});
     </script>
 </body>
 </html>

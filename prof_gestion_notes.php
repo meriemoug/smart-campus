@@ -114,7 +114,24 @@ try {
                 $stmt_ins->execute([$id_etud, $selected_module, $id_prof, $td, $tp, $exam]);
             }
         }
-        $message = "Les notes ont été enregistrées avec succès !";
+
+        // --- NOTIFICATION : ENVOI AUX ÉTUDIANTS DE LA SECTION ---
+        $stmt_m_info = $pdo->prepare("SELECT nom_mod FROM module WHERE id_mod = ?");
+        $stmt_m_info->execute([$selected_module]);
+        $mod_nom = $stmt_m_info->fetchColumn();
+
+        $stmt_etu_users = $pdo->prepare("SELECT u.id_user FROM user u JOIN etudiant e ON u.id_user = e.id_user WHERE e.id_Sec = ?");
+        $stmt_etu_users->execute([$selected_section]);
+        $etudiants_users = $stmt_etu_users->fetchAll(PDO::FETCH_COLUMN);
+
+        $msg_etudiant = "De nouvelles notes ont été enregistrées ou mises à jour pour le module : $mod_nom.";
+        $stmt_notif = $pdo->prepare("INSERT INTO notification (id_user, type, message) VALUES (?, 'note', ?)");
+        foreach ($etudiants_users as $uid_etu) {
+            $stmt_notif->execute([$uid_etu, $msg_etudiant]);
+        }
+        // --- FIN NOTIFICATION ---
+
+        $message = "Les notes ont été enregistrées et les étudiants de la section ont été notifiés avec succès !";
     }
 
     if (!empty($selected_section) && !empty($selected_module)) {

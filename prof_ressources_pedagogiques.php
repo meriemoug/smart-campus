@@ -88,7 +88,7 @@ try {
         }
     }
 
-    // 3. Traitement de la publication (Fichier ou Lien)
+    // 3. Traitement de la publication (Fichier ou Lien) + Notification
     if (isset($_POST['publier_ressource'])) {
         $titre = trim($_POST['titre'] ?? '');
         $id_module = $_POST['id_module'] ?? '';
@@ -134,34 +134,68 @@ try {
                 }
             }
 
-            // Si aucune erreur, insertion en base
+            // Si aucune erreur, insertion en base et envoi des notifications
             if (empty($error) && !empty($lien_ressource)) {
                 $stmt_ins = $pdo->prepare("
                     INSERT INTO ressource (id_prof, id_sect, id_module, titre, lien, type_res) 
                     VALUES (?, ?, ?, ?, ?, ?)
                 ");
                 $stmt_ins->execute([$id_prof, $id_sect, $id_module, $titre, $lien_ressource, $type_res]);
-                $message = "La ressource a été publiée avec succès !";
+
+                // --- NOTIFICATION : ENVOI AUX ÉTUDIANTS DE LA SECTION ---
+                $stmt_m_info = $pdo->prepare("SELECT nom_mod FROM module WHERE id_mod = ?");
+                $stmt_m_info->execute([$id_module]);
+                $mod_nom = $stmt_m_info->fetchColumn();
+
+                $stmt_etu_users = $pdo->prepare("SELECT u.id_user FROM user u JOIN etudiant e ON u.id_user = e.id_user WHERE e.id_Sec = ?");
+                $stmt_etu_users->execute([$id_sect]);
+                $etudiants_users = $stmt_etu_users->fetchAll(PDO::FETCH_COLUMN);
+
+                // Message incluant le titre pour faciliter la suppression ultérieure
+                $msg_etudiant = "Nouvelle ressource ($type_res) : \"$titre\" pour le module : $mod_nom.";
+                
+                // Utilisation des accents graves autour de `type` pour éviter les conflits SQL
+                $stmt_notif = $pdo->prepare("INSERT INTO notification (id_user, `type`, message) VALUES (?, 'ressource', ?)");
+                foreach ($etudiants_users as $uid_etu) {
+                    $stmt_notif->execute([$uid_etu, $msg_etudiant]);
+                }
+                // --- FIN NOTIFICATION ---
+
+                $message = "La ressource a été publiée et les étudiants de la section ont été notifiés avec succès !";
             }
         }
     }
 
-    // 4. Traitement de la suppression d'une ressource
+    // 4. Traitement de la suppression d'une ressource (et de ses notifications associées)
     if (isset($_POST['supprimer_ressource'])) {
         $id_R = $_POST['id_R'] ?? '';
         
-        $stmt_chk = $pdo->prepare("SELECT lien FROM ressource WHERE id_R = ? AND id_prof = ?");
+        $stmt_chk = $pdo->prepare("
+            SELECT r.*, m.nom_mod 
+            FROM ressource r
+            JOIN module m ON r.id_module = m.id_mod
+            WHERE r.id_R = ? AND r.id_prof = ?
+        ");
         $stmt_chk->execute([$id_R, $id_prof]);
         $res_data = $stmt_chk->fetch(PDO::FETCH_ASSOC);
 
         if ($res_data) {
-            // Si c'est un fichier physique (et non un lien externe http/https), on le supprime du serveur
+            $titre_res = $res_data['titre'];
+
+            // Si c'est un fichier physique (et non un lien externe), on le supprime du serveur
             if (!preg_match('/^https?:\/\//', $res_data['lien']) && file_exists($res_data['lien'])) {
                 unlink($res_data['lien']);
             }
+
+            // Supprimer toutes les notifications liées à cette ressource précise
+            $stmt_del_notif = $pdo->prepare("DELETE FROM notification WHERE `type` = 'ressource' AND message LIKE ?");
+            $stmt_del_notif->execute(['%' . $titre_res . '%']);
+
+            // Supprimer la ressource de la base de données
             $stmt_del = $pdo->prepare("DELETE FROM ressource WHERE id_R = ?");
             $stmt_del->execute([$id_R]);
-            $message = "La ressource a été supprimée avec succès.";
+            
+            $message = "La ressource et ses notifications associées ont été supprimées avec succès.";
         }
     }
 
