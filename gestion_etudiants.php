@@ -646,7 +646,7 @@ try {
                         </div>
 
                         <div class="form-group">
-                            <label for="annee">Année d'étude (Automatique)</label>
+                            <label for="annee">Année d'étude</label>
                             <input type="number" id="annee" name="annee" readonly style="background-color: #eee;" required placeholder="Auto">
                         </div>
 
@@ -690,22 +690,23 @@ try {
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>ID</th>
+                                        
                                         <th>Nom & Prénom</th>
                                         <th>Année</th>
-                                        <th>Section / Groupe</th>
                                         <th>Spécialité</th>
+                                        <th>Section / Groupe</th>
+                                        
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php foreach ($etudiants as $etu): ?>
                                         <tr>
-                                            <td><strong><?php echo htmlspecialchars($etu['id_user']); ?></strong></td>
                                             <td><?php echo htmlspecialchars($etu['nom'] . ' ' . $etu['prenom']); ?></td>
                                             <td>Année <?php echo htmlspecialchars($etu['annee']); ?></td>
-                                            <td><?php echo htmlspecialchars(($etu['nom_sec'] ?? 'Section') . ' - G.' . ($etu['groupe'] ?? 1)); ?></td>
                                             <td><?php echo htmlspecialchars($etu['nom_spec'] ?? 'Non assignée'); ?></td>
+                                            <td><?php echo htmlspecialchars(($etu['nom_sec'] ?? 'Section') . ' - G.' . ($etu['groupe'] ?? 1)); ?></td>
+                                            
                                             <td style="display: flex; align-items: center; gap: 5px;">
                                                 <!-- Bouton Modifier -->
                                                 <button type="button" class="btn-edit" onclick="ouvrirModalEdit(
@@ -791,7 +792,7 @@ try {
                 </div>
 
                 <div class="form-group">
-                    <label for="edit_password">Nouveau mot de passe (Laisser vide si inchangé)</label>
+                    <label for="edit_password">Nouveau mot de passe </label>
                     <input type="password" id="edit_password" name="password" placeholder="Laisser vide pour garder l'actuel">
                 </div>
 

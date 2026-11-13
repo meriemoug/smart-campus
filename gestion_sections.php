@@ -79,6 +79,7 @@ try {
         $id_Sec_del = intval($_POST['id_Sec_to_delete'] ?? 0);
         if ($id_Sec_del > 0) {
             $pdo->prepare("DELETE FROM seance WHERE id_Sec = ?")->execute([$id_Sec_del]);
+            $pdo->prepare("DELETE FROM enseignement WHERE id_Sec = ?")->execute([$id_Sec_del]);
             
             $stmt_del_sec = $pdo->prepare("DELETE FROM section WHERE id_Sec = ?");
             $stmt_del_sec->execute([$id_Sec_del]);
@@ -90,16 +91,17 @@ try {
         }
     }
 
-    // 2. Modification du professeur responsable d'un module par saisie du nom (avec vérification en BDD)
+    // 2. Modification du professeur responsable d'un module (Indépendant par section)[cite: 2]
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_prof_module'])) {
         $id_mod_target = intval($_POST['id_mod_target'] ?? 0);
         $nom_prof_saisi = trim($_POST['nom_prof_saisi'] ?? '');
+        $id_Sec_courante = isset($_GET['id_sec_selected']) ? intval($_GET['id_sec_selected']) : 0;
 
-        if ($id_mod_target > 0) {
+        if ($id_mod_target > 0 && $id_Sec_courante > 0) {
             if (empty($nom_prof_saisi)) {
-                $stmt_del = $pdo->prepare("DELETE FROM enseignement WHERE id_mod = ?");
-                $stmt_del->execute([$id_mod_target]);
-                $message = "Le professeur responsable a été retiré avec succès.";
+                $stmt_del = $pdo->prepare("DELETE FROM enseignement WHERE id_mod = ? AND id_Sec = ?");
+                $stmt_del->execute([$id_mod_target, $id_Sec_courante]);
+                $message = "Le professeur responsable a été retiré pour cette section.";
             } else {
                 $stmt_chk_prof = $pdo->prepare("SELECT p.id_prof FROM prof p JOIN user u ON p.id_user = u.id_user WHERE CONCAT(u.nom, ' ', u.prenom) = ? OR CONCAT(u.prenom, ' ', u.nom) = ? OR u.nom = ?");
                 $stmt_chk_prof->execute([$nom_prof_saisi, $nom_prof_saisi, $nom_prof_saisi]);
@@ -107,16 +109,16 @@ try {
 
                 if ($prof_data) {
                     $id_prof_target = $prof_data['id_prof'];
-                    $stmt_ens = $pdo->prepare("INSERT INTO enseignement (id_prof, id_mod) VALUES (?, ?) 
+                    $stmt_ens = $pdo->prepare("INSERT INTO enseignement (id_prof, id_mod, id_Sec) VALUES (?, ?, ?) 
                                                ON DUPLICATE KEY UPDATE id_prof = VALUES(id_prof)");
-                    $stmt_ens->execute([$id_prof_target, $id_mod_target]);
-                    $message = "Le professeur responsable du module a été mis à jour avec succès !";
+                    $stmt_ens->execute([$id_prof_target, $id_mod_target, $id_Sec_courante]);
+                    $message = "Le professeur responsable de ce module pour cette section a été mis à jour avec succès !";
                 } else {
                     $error = "Erreur : Le professeur '$nom_prof_saisi' n'existe pas dans la base de données.";
                 }
             }
         } else {
-            $error = "Module cible invalide.";
+            $error = "Erreur : Section ou module cible invalide.";
         }
     }
 
@@ -196,11 +198,6 @@ try {
 
     $toutes_seances = $pdo->query("SELECT id_salle, jour, heurD, heurF FROM seance")->fetchAll(PDO::FETCH_ASSOC);
 
-    $stmt_ens_all = $pdo->query("SELECT e.id_mod, u.nom, u.prenom FROM enseignement e JOIN prof p ON e.id_prof = p.id_prof JOIN user u ON p.id_user = u.id_user");
-    while ($row = $stmt_ens_all->fetch(PDO::FETCH_ASSOC)) {
-        $default_profs_names[$row['id_mod']] = trim($row['nom'] . ' ' . $row['prenom']);
-    }
-
     $filter_sp = trim($_GET['filter_sp'] ?? '');
     $filter_annee = trim($_GET['filter_annee'] ?? '');
 
@@ -228,16 +225,24 @@ try {
         $selected_section = $stmt_sel->fetch(PDO::FETCH_ASSOC);
 
         if ($selected_section) {
+            // Récupération des modules et du prof associé SPÉCIFIQUEMENT à cette section[cite: 2]
             $stmt_mods = $pdo->prepare("SELECT m.id_mod, m.Nom_mod, p.semestre, p.coefficient, u.nom as prof_nom, u.prenom as prof_prenom
                                        FROM programme p 
                                        JOIN module m ON p.id_mod = m.id_mod 
-                                       LEFT JOIN enseignement e ON m.id_mod = e.id_mod
+                                       LEFT JOIN enseignement e ON m.id_mod = e.id_mod AND e.id_Sec = ?
                                        LEFT JOIN prof pr ON e.id_prof = pr.id_prof
                                        LEFT JOIN user u ON pr.id_user = u.id_user
                                        WHERE p.id_sp = ?
                                        ORDER BY p.semestre ASC, m.Nom_mod ASC");
-            $stmt_mods->execute([$selected_section['id_sp']]);
+            $stmt_mods->execute([$selected_section['id_Sec'], $selected_section['id_sp']]);
             $modules_section = $stmt_mods->fetchAll(PDO::FETCH_ASSOC);
+
+            // Charger les noms par défaut pour la modale EDT
+            foreach($modules_section as $ms) {
+                if(!empty($ms['prof_nom'])) {
+                    $default_profs_names[$ms['id_mod']] = trim($ms['prof_nom'] . ' ' . $ms['prof_prenom']);
+                }
+            }
 
             $stmt_seances = $pdo->prepare("SELECT s.*, m.Nom_mod, sal.nom_salle, u.nom as prof_nom, u.prenom as prof_prenom, sec_cible.nom_sec as section_nom 
                                            FROM seance s 
@@ -517,6 +522,7 @@ $creneaux = [
                         <tbody>
                             <?php foreach ($sections as $sec): ?>
                                 <tr style="<?php echo ($selected_section && $selected_section['id_Sec'] == $sec['id_Sec']) ? 'background-color: #fdf8e9;' : ''; ?>">
+                                    
                                     <td><?php echo htmlspecialchars($sec['nom_sec']); ?></td>
                                     <td><?php echo htmlspecialchars($sec['NomSp']); ?></td>
                                     <td>Année <?php echo htmlspecialchars($sec['annee']); ?></td>
@@ -554,7 +560,7 @@ $creneaux = [
                     <!-- BLOC PROFESSEURS ASSOCIÉS AUX MODULES -->
                     <div class="card" style="border: 1px solid var(--header); background: #fff; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.02);">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                            <h4 style="color: var(--header); font-size: 16px;">👨‍🏫 Attribution des Professeurs Responsables par Module</h4>
+                            <h4 style="color: var(--header); font-size: 16px;">👨‍🏫 Attribution des Professeurs Responsables par Module (Pour cette section)</h4>
                             <span style="font-size: 12px; color: var(--text-muted);">Tapez le nom et prénom de l'enseignant</span>
                         </div>
 
@@ -587,9 +593,9 @@ $creneaux = [
                                                 <?php endif; ?>
                                             </td>
                                             <td>
-                                                <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>" method="POST" style="display: flex; gap: 8px; align-items: center; margin: 0;">
+                                                <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>&filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" method="POST" style="display: flex; gap: 8px; align-items: center; margin: 0;">
                                                     <input type="hidden" name="id_mod_target" value="<?php echo $ms['id_mod']; ?>">
-                                                    <input type="text" name="nom_prof_saisi" list="liste_professeurs" value="<?php echo htmlspecialchars($nom_prof_actuel); ?>" placeholder="Tapez le nom du prof..." required style="padding: 7px; border-radius: 6px; border: 1px solid var(--border); flex: 1; background: #FAFCFE; font-size: 13px;">
+                                                    <input type="text" name="nom_prof_saisi" list="liste_professeurs" value="<?php echo htmlspecialchars($nom_prof_actuel); ?>" placeholder="Tapez le nom du prof..." style="padding: 7px; border-radius: 6px; border: 1px solid var(--border); flex: 1; background: #FAFCFE; font-size: 13px;">
                                                     <button type="submit" name="modifier_prof_module" class="btn-submit" style="width: auto; padding: 7px 12px; font-size: 12px; background-color: var(--menu); white-space: nowrap;">
                                                         💾 Enregistrer
                                                     </button>
