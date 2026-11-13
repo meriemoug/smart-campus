@@ -91,7 +91,17 @@ try {
         }
     }
 
-    // 2. Modification du professeur responsable d'un module (Indépendant par section)[cite: 2]
+    // SUPPRESSION DE TOUT L'EMPLOI DU TEMPS DE LA SECTION
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_edt'])) {
+        $id_Sec_edt = intval($_POST['id_Sec_edt'] ?? 0);
+        if ($id_Sec_edt > 0) {
+            $stmt_del_edt = $pdo->prepare("DELETE FROM seance WHERE id_Sec = ?");
+            $stmt_del_edt->execute([$id_Sec_edt]);
+            $message = "L'emploi du temps de cette section a été entièrement supprimé avec succès.";
+        }
+    }
+
+    // 2. Modification du professeur responsable d'un module
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_prof_module'])) {
         $id_mod_target = intval($_POST['id_mod_target'] ?? 0);
         $nom_prof_saisi = trim($_POST['nom_prof_saisi'] ?? '');
@@ -122,7 +132,7 @@ try {
         }
     }
 
-    // 3. Enregistrement d'une séance (Professeur optionnel dans l'EDT)
+    // 3. Enregistrement d'une séance (Vérification Salle, Section/Groupe, et Professeur)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajouter_seance'])) {
         $id_Sec = intval($_POST['id_Sec'] ?? 0);
         $jour = trim($_POST['jour'] ?? '');
@@ -170,10 +180,18 @@ try {
                 $stmt_conflict_sec->execute([$id_Sec, $jour, $heurF, $heurD, $id_groupe]);
             }
 
+            $stmt_conflict_prof = null;
+            if ($id_prof !== null) {
+                $stmt_conflict_prof = $pdo->prepare("SELECT id_Seance FROM seance WHERE id_prof = ? AND jour = ? AND (heurD < ? AND heurF > ?)");
+                $stmt_conflict_prof->execute([$id_prof, $jour, $heurF, $heurD]);
+            }
+
             if ($stmt_conflict_room->rowCount() > 0) {
                 $error = "Erreur : Cette salle est déjà occupée sur ce créneau horaire par un autre cours !";
             } elseif ($stmt_conflict_sec->rowCount() > 0) {
                 $error = "Erreur : Conflit d'horaire ! Cette section (ou ce groupe) a déjà une séance programmée sur ce créneau.";
+            } elseif ($id_prof !== null && $stmt_conflict_prof->rowCount() > 0) {
+                $error = "Erreur : Conflit d'horaire ! Ce professeur a déjà une autre séance programmée ce $jour sur ce même créneau.";
             } else {
                 $stmt_ins_s = $pdo->prepare("INSERT INTO seance (id_Sec, id_salle, id_prof, id_mod, type_seance, jour, heurD, heurF, id_groupe) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $stmt_ins_s->execute([$id_Sec, $id_salle, $id_prof, $id_mod, $type_seance, $jour, $heurD, $heurF, ($type_seance === 'cours' ? null : $id_groupe)]);
@@ -184,7 +202,7 @@ try {
         }
     }
 
-    // 4. Suppression d'une séance
+    // 4. Suppression d'une séance unitaire
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_seance'])) {
         $id_Seance_del = intval($_POST['id_Seance_to_delete'] ?? 0);
         $pdo->prepare("DELETE FROM seance WHERE id_Seance = ?")->execute([$id_Seance_del]);
@@ -225,7 +243,6 @@ try {
         $selected_section = $stmt_sel->fetch(PDO::FETCH_ASSOC);
 
         if ($selected_section) {
-            // Récupération des modules et du prof associé SPÉCIFIQUEMENT à cette section[cite: 2]
             $stmt_mods = $pdo->prepare("SELECT m.id_mod, m.Nom_mod, p.semestre, p.coefficient, u.nom as prof_nom, u.prenom as prof_prenom
                                        FROM programme p 
                                        JOIN module m ON p.id_mod = m.id_mod 
@@ -237,7 +254,6 @@ try {
             $stmt_mods->execute([$selected_section['id_Sec'], $selected_section['id_sp']]);
             $modules_section = $stmt_mods->fetchAll(PDO::FETCH_ASSOC);
 
-            // Charger les noms par défaut pour la modale EDT
             foreach($modules_section as $ms) {
                 if(!empty($ms['prof_nom'])) {
                     $default_profs_names[$ms['id_mod']] = trim($ms['prof_nom'] . ' ' . $ms['prof_prenom']);
@@ -511,7 +527,6 @@ $creneaux = [
                     <table>
                         <thead>
                             <tr>
-                                
                                 <th>Nom de la Section</th>
                                 <th>Spécialité</th>
                                 <th>Année</th>
@@ -522,7 +537,6 @@ $creneaux = [
                         <tbody>
                             <?php foreach ($sections as $sec): ?>
                                 <tr style="<?php echo ($selected_section && $selected_section['id_Sec'] == $sec['id_Sec']) ? 'background-color: #fdf8e9;' : ''; ?>">
-                                    
                                     <td><?php echo htmlspecialchars($sec['nom_sec']); ?></td>
                                     <td><?php echo htmlspecialchars($sec['NomSp']); ?></td>
                                     <td>Année <?php echo htmlspecialchars($sec['annee']); ?></td>
@@ -554,7 +568,15 @@ $creneaux = [
                         <h3 style="color: var(--header);">
                             ⚙️ Section : <span style="color: var(--menu);"><?php echo htmlspecialchars($selected_section['nom_sec']); ?></span> (<?php echo htmlspecialchars($selected_section['NomSp']); ?>)
                         </h3>
-                        <a href="gestion_sections.php" style="color: var(--text-muted); text-decoration: none; font-size: 13px;">❌ Fermer</a>
+                        <div style="display: flex; gap: 15px; align-items: center;">
+                            <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>&filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" method="POST" style="margin:0;" onsubmit="return confirm('Attention : Voulez-vous vraiment supprimer tout l\'emploi du temps de cette section ? Cette action est irréversible.');">
+                                <input type="hidden" name="id_Sec_edt" value="<?php echo $selected_section['id_Sec']; ?>">
+                                <button type="submit" name="supprimer_edt" class="btn-delete" style="padding: 7px 12px; font-size: 13px;">
+                                    🗑️ Supprimer tout l'EDT
+                                </button>
+                            </form>
+                            <a href="gestion_sections.php" style="color: var(--text-muted); text-decoration: none; font-size: 13px;">❌ Fermer</a>
+                        </div>
                     </div>
 
                     <!-- BLOC PROFESSEURS ASSOCIÉS AUX MODULES -->
