@@ -91,14 +91,12 @@ try {
         $nouveau_mdp = trim($_POST['password'] ?? '');
 
         if (!empty($id_etu_mod) && !empty($nom) && !empty($prenom) && !empty($email) && !empty($id_spec) && !empty($id_section) && !empty($groupe)) {
-            // Vérifier si l'email appartient à un autre utilisateur
             $stmt_check_email = $pdo->prepare("SELECT id_user FROM user WHERE email = ? AND id_user != ?");
             $stmt_check_email->execute([$email, $id_etu_mod]);
 
             if ($stmt_check_email->rowCount() > 0) {
                 $error = "Cette adresse email est déjà utilisée par un autre compte.";
             } else {
-                // Vérifier la section et la spécialité
                 $stmt_sec_check = $pdo->prepare("SELECT nombre_groupes FROM section WHERE id_Sec = ?");
                 $stmt_sec_check->execute([$id_section]);
                 $section_data = $stmt_sec_check->fetch(PDO::FETCH_ASSOC);
@@ -119,7 +117,6 @@ try {
                     } else {
                         $pdo->beginTransaction();
 
-                        // Mise à jour de la table user
                         if (!empty($nouveau_mdp)) {
                             $hashed_password = password_hash($nouveau_mdp, PASSWORD_DEFAULT);
                             $stmt_up_user = $pdo->prepare("UPDATE user SET nom = ?, prenom = ?, email = ?, mdP = ? WHERE id_user = ?");
@@ -129,7 +126,6 @@ try {
                             $stmt_up_user->execute([$nom, $prenom, $email, $id_etu_mod]);
                         }
 
-                        // Mise à jour de la table etudiant
                         $stmt_up_etu = $pdo->prepare("UPDATE etudiant SET annee = ?, id_Sec = ?, groupe = ?, id_sp = ? WHERE id_user = ?");
                         $stmt_up_etu->execute([$annee_spec, $id_section, $groupe_int, $id_spec, $id_etu_mod]);
 
@@ -167,26 +163,43 @@ try {
     $stmt_specs = $pdo->query("SELECT * FROM specialite ORDER BY NomSp ASC");
     $specialites = $stmt_specs->fetchAll(PDO::FETCH_ASSOC);
 
-    // 6. Gestion de la recherche
+    // 6. Gestion des filtres et de la recherche
+    $spec_filter = trim($_GET['spec'] ?? '');
+    $sec_filter = trim($_GET['sec'] ?? '');
+    $groupe_filter = trim($_GET['groupe'] ?? '');
     $search = trim($_GET['search'] ?? '');
 
-    if (!empty($search)) {
-        $stmt_etus = $pdo->prepare("SELECT u.id_user, u.nom, u.prenom, u.email, e.annee, e.groupe, e.id_Sec, e.id_sp, sec.nom_sec, sp.NomSp as nom_spec
-                                    FROM etudiant e 
-                                    JOIN user u ON e.id_user COLLATE utf8mb4_unicode_ci = u.id_user COLLATE utf8mb4_unicode_ci
-                                    LEFT JOIN section sec ON e.id_Sec = sec.id_Sec
-                                    LEFT JOIN specialite sp ON e.id_sp = sp.id_sp
-                                    WHERE u.nom LIKE ? OR u.prenom LIKE ? OR u.id_user LIKE ?
-                                    ORDER BY u.nom ASC");
-        $stmt_etus->execute(["%$search%", "%$search%", "%$search%"]);
-    } else {
-        $stmt_etus = $pdo->query("SELECT u.id_user, u.nom, u.prenom, u.email, e.annee, e.groupe, e.id_Sec, e.id_sp, sec.nom_sec, sp.NomSp as nom_spec
-                                    FROM etudiant e 
-                                    JOIN user u ON e.id_user COLLATE utf8mb4_unicode_ci = u.id_user COLLATE utf8mb4_unicode_ci
-                                    LEFT JOIN section sec ON e.id_Sec = sec.id_Sec
-                                    LEFT JOIN specialite sp ON e.id_sp = sp.id_sp
-                                    ORDER BY u.nom ASC");
+    $sql = "SELECT u.id_user, u.nom, u.prenom, u.email, e.annee, e.groupe, e.id_Sec, e.id_sp, sec.nom_sec, sp.NomSp as nom_spec
+            FROM etudiant e 
+            JOIN user u ON e.id_user COLLATE utf8mb4_unicode_ci = u.id_user COLLATE utf8mb4_unicode_ci
+            LEFT JOIN section sec ON e.id_Sec = sec.id_Sec
+            LEFT JOIN specialite sp ON e.id_sp = sp.id_sp
+            WHERE 1=1";
+    $params = [];
+
+    if (!empty($spec_filter)) {
+        $sql .= " AND e.id_sp = ?";
+        $params[] = $spec_filter;
     }
+    if (!empty($sec_filter)) {
+        $sql .= " AND e.id_Sec = ?";
+        $params[] = $sec_filter;
+    }
+    if (!empty($groupe_filter)) {
+        $sql .= " AND e.groupe = ?";
+        $params[] = $groupe_filter;
+    }
+    if (!empty($search)) {
+        $sql .= " AND (u.nom LIKE ? OR u.prenom LIKE ? OR u.id_user LIKE ?)";
+        $params[] = "%$search%";
+        $params[] = "%$search%";
+        $params[] = "%$search%";
+    }
+
+    $sql .= " ORDER BY u.nom ASC";
+
+    $stmt_etus = $pdo->prepare($sql);
+    $stmt_etus->execute($params);
     $etudiants = $stmt_etus->fetchAll(PDO::FETCH_ASSOC);
 
 } catch (PDOException $e) {
@@ -365,6 +378,61 @@ try {
             box-shadow: 0 0 0 3px rgba(34, 107, 148, 0.15);
         }
 
+        /* Styles pour les boutons en bulle (Pills) */
+        .filter-container {
+            background-color: #FAFCFE;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .filter-group-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .filter-label {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--header);
+            min-width: 85px;
+        }
+
+        .filter-pill {
+            background-color: var(--card);
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .filter-pill:hover {
+            border-color: var(--menu);
+            color: var(--menu);
+            background-color: #f0f7fc;
+        }
+
+        .filter-pill.active {
+            background-color: var(--header);
+            color: var(--on-blue);
+            border-color: var(--header);
+            font-weight: 600;
+        }
+
         .search-form {
             display: flex;
             gap: 10px;
@@ -442,8 +510,7 @@ try {
             cursor: pointer;
             text-decoration: none;
             display: inline-block;
-            margin: 0;
-            margin-top:10px;
+            margin-top: 10px;
         }
 
         .btn-delete {
@@ -456,8 +523,7 @@ try {
             font-weight: 600;
             cursor: pointer;
             transition: opacity 0.2s;
-            margin: 0;
-            margin-top:10px;
+            margin-top: 10px;
         }
 
         .btn-delete:hover {
@@ -505,7 +571,6 @@ try {
             border: 1px solid #f5c6cb;
         }
 
-        /* Modal de modification */
         #modalEdit { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
         .modal-content { background: white; padding: 25px; border-radius: 10px; width: 480px; max-width: 90%; max-height: 90vh; overflow-y: auto; }
 
@@ -671,31 +736,93 @@ try {
                     </form>
                 </div>
 
-                <!-- 2. LISTE DES ÉTUDIANTS -->
+                <!-- 2. LISTE DES ÉTUDIANTS AVEC FILTRAGE PAR BULLES -->
                 <div class="card">
                     <h3>Étudiants inscrits</h3>
 
+                    <!-- Filtres en boutons bulle (Pills) en cascade -->
+                    <div class="filter-container">
+                        <!-- 1. Ligne Spécialités -->
+                        <div class="filter-group-row">
+                            <span class="filter-label">Spécialité :</span>
+                            <a href="gestion_etudiants.php<?php echo !empty($search) ? '?search=' . urlencode($search) : ''; ?>" 
+                               class="filter-pill <?php echo empty($spec_filter) ? 'active' : ''; ?>">Toutes</a>
+                            <?php foreach ($specialites as $sp): ?>
+                                <a href="gestion_etudiants.php?spec=<?php echo $sp['id_sp']; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" 
+                                   class="filter-pill <?php echo ($spec_filter == $sp['id_sp']) ? 'active' : ''; ?>">
+                                    📚 <?php echo htmlspecialchars($sp['NomSp']); ?>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <!-- 2. Ligne Sections (affichée si une spécialité est sélectionnée) -->
+                        <?php if (!empty($spec_filter)): 
+                            $filtered_sections = array_filter($sections, function($sec) use ($spec_filter) {
+                                return $sec['id_sp'] == $spec_filter;
+                            });
+                        ?>
+                        <div class="filter-group-row">
+                            <span class="filter-label">Section :</span>
+                            <a href="gestion_etudiants.php?spec=<?php echo $spec_filter; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" 
+                               class="filter-pill <?php echo empty($sec_filter) ? 'active' : ''; ?>">Toutes</a>
+                            <?php foreach ($filtered_sections as $sec): ?>
+                                <a href="gestion_etudiants.php?spec=<?php echo $spec_filter; ?>&sec=<?php echo $sec['id_Sec']; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" 
+                                   class="filter-pill <?php echo ($sec_filter == $sec['id_Sec']) ? 'active' : ''; ?>">
+                                    🏢 <?php echo htmlspecialchars($sec['nom_sec']); ?>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- 3. Ligne Groupes (affichée si une section est sélectionnée) -->
+                        <?php if (!empty($sec_filter)): 
+                            $selected_sec_data = null;
+                            foreach ($sections as $sec) {
+                                if ($sec['id_Sec'] == $sec_filter) {
+                                    $selected_sec_data = $sec;
+                                    break;
+                                }
+                            }
+                            $max_g = $selected_sec_data ? intval($selected_sec_data['nombre_groupes'] ?? 4) : 4;
+                        ?>
+                        <div class="filter-group-row">
+                            <span class="filter-label">Groupe :</span>
+                            <a href="gestion_etudiants.php?spec=<?php echo $spec_filter; ?>&sec=<?php echo $sec_filter; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" 
+                               class="filter-pill <?php echo empty($groupe_filter) ? 'active' : ''; ?>">Tous</a>
+                            <?php for ($g = 1; $g <= $max_g; $g++): ?>
+                                <a href="gestion_etudiants.php?spec=<?php echo $spec_filter; ?>&sec=<?php echo $sec_filter; ?>&groupe=<?php echo $g; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" 
+                                   class="filter-pill <?php echo ($groupe_filter == $g) ? 'active' : ''; ?>">
+                                    👥 G. <?php echo $g; ?>
+                                </a>
+                            <?php endfor; ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Barre de recherche combinée avec les filtres -->
                     <form action="gestion_etudiants.php" method="GET" class="search-form">
-                        <input type="text" name="search" placeholder="Rechercher nom/prénom..." value="<?php echo htmlspecialchars($search); ?>">
+                        <?php if (!empty($spec_filter)): ?><input type="hidden" name="spec" value="<?php echo htmlspecialchars($spec_filter); ?>"><?php endif; ?>
+                        <?php if (!empty($sec_filter)): ?><input type="hidden" name="sec" value="<?php echo htmlspecialchars($sec_filter); ?>"><?php endif; ?>
+                        <?php if (!empty($groupe_filter)): ?><input type="hidden" name="groupe" value="<?php echo htmlspecialchars($groupe_filter); ?>"><?php endif; ?>
+                        
+                        <input type="text" name="search" placeholder="Rechercher par nom, prénom ou ID..." value="<?php echo htmlspecialchars($search); ?>">
                         <button type="submit" class="btn-search">Rechercher</button>
-                        <?php if (!empty($search)): ?>
-                            <a href="gestion_etudiants.php" class="btn-reset">X</a>
+                        <?php if (!empty($search) || !empty($spec_filter) || !empty($sec_filter) || !empty($groupe_filter)): ?>
+                            <a href="gestion_etudiants.php" class="btn-reset" title="Réinitialiser tous les filtres">Réinitialiser</a>
                         <?php endif; ?>
                     </form>
 
                     <?php if (empty($etudiants)): ?>
-                        <p style="color: var(--text-muted);">Aucun étudiant trouvé.</p>
+                        <p style="color: var(--text-muted);">Aucun étudiant trouvé pour ces critères.</p>
                     <?php else: ?>
                         <div style="overflow-x: auto;">
                             <table>
                                 <thead>
                                     <tr>
-                                        
                                         <th>Nom & Prénom</th>
                                         <th>Année</th>
                                         <th>Spécialité</th>
                                         <th>Section / Groupe</th>
-                                        
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
@@ -811,12 +938,10 @@ try {
             var idSpChoisi = selectSp.value;
             var optionChoisie = selectSp.options[selectSp.selectedIndex];
 
-            // 1. Remplissage automatique de l'année
             var anneeInput = document.getElementById(idInputAnnee);
             var annee = optionChoisie ? optionChoisie.getAttribute('data-annee') : '';
             anneeInput.value = annee ? annee : '';
 
-            // 2. Filtrage des sections rattachées à cette spécialité
             var selectSec = document.getElementById(idSelectSec);
             var optionsSec = selectSec.options;
             var nbSectionsTrouvees = 0;
@@ -864,7 +989,6 @@ try {
             document.getElementById('edit_groupe').value = groupe;
             document.getElementById('edit_password').value = '';
 
-            // Filtrer les sections et présélectionner la section actuelle de l'étudiant
             surChangementSpecialite('edit_id_spec', 'edit_annee', 'edit_id_section', id_sec);
 
             document.getElementById('modalEdit').style.display = 'flex';
