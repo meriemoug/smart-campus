@@ -13,12 +13,14 @@ $pass = '';
 
 $message = '';
 $error = '';
+$tous_examens = [];
+$toutes_seances = [];
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // 1. Enregistrement ou mise à jour de l'examen pour un module et une section
+    // 1. Enregistrement ou mise à jour de l'examen avec vérification complète des conflits (Salle, Section, Professeur)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enregistrer_examen'])) {
         $id_sec = intval($_POST['id_sec'] ?? 0);
         $id_mod = intval($_POST['id_mod'] ?? 0);
@@ -29,17 +31,65 @@ try {
         $id_salle = intval($_POST['id_salle'] ?? 0);
         $type_exam = trim($_POST['type_exam'] ?? 'normal');
 
-        if ($id_sec > 0 && $id_mod > 0 && $id_prof > 0 && !empty($dateEx) && !empty($heurD) && !empty($heurF)) {
-            // Insertion ou mise à jour si un examen existe déjà pour cette section et ce module
-            $stmt_ins = $pdo->prepare("INSERT INTO exam (id_mod, id_sec, id_prof, id_salle, type_exam, dateEx, heurD, heurF) 
-                                       VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
-                                       ON DUPLICATE KEY UPDATE 
-                                       id_prof = VALUES(id_prof), id_salle = VALUES(id_salle), type_exam = VALUES(type_exam), 
-                                       dateEx = VALUES(dateEx), heurD = VALUES(heurD), heurF = VALUES(heurF)");
-            $stmt_ins->execute([$id_mod, $id_sec, $id_prof, ($id_salle > 0 ? $id_salle : null), $type_exam, $dateEx, $heurD, $heurF]);
-            $message = "Planning de l'examen enregistré avec succès !";
+        if ($id_sec > 0 && $id_mod > 0 && $id_prof > 0 && !empty($dateEx) && !empty($heurD) && !empty($heurF) && $id_salle > 0) {
+            
+            // Récupérer l'ID de l'examen actuel s'il existe pour ce module et cette section (pour l'exclure du test de conflit en cas de mise à jour)
+            $stmt_ex_exist = $pdo->prepare("SELECT id_exam FROM exam WHERE id_sec = ? AND id_mod = ?");
+            $stmt_ex_exist->execute([$id_sec, $id_mod]);
+            $existing_ex = $stmt_ex_exist->fetch(PDO::FETCH_ASSOC);
+            $current_id_exam = $existing_ex ? $existing_ex['id_exam'] : 0;
+
+            // 1. Vérifier si la section a déjà un autre examen sur ce même créneau
+            $stmt_conf_sec = $pdo->prepare("SELECT id_exam FROM exam WHERE id_sec = ? AND dateEx = ? AND (heurD < ? AND heurF > ?) AND id_exam != ?");
+            $stmt_conf_sec->execute([$id_sec, $dateEx, $heurF, $heurD, $current_id_exam]);
+
+            // 2. Vérifier si le professeur surveille déjà un autre examen sur ce même créneau
+            $stmt_conf_prof = $pdo->prepare("SELECT id_exam FROM exam WHERE id_prof = ? AND dateEx = ? AND (heurD < ? AND heurF > ?) AND id_exam != ?");
+            $stmt_conf_prof->execute([$id_prof, $dateEx, $heurF, $heurD, $current_id_exam]);
+
+            // 3. Vérifier les conflits de salle avec d'autres examens
+            $stmt_conf_exam = $pdo->prepare("SELECT id_exam FROM exam WHERE id_salle = ? AND dateEx = ? AND (heurD < ? AND heurF > ?) AND id_exam != ?");
+            $stmt_conf_exam->execute([$id_salle, $dateEx, $heurF, $heurD, $current_id_exam]);
+
+            // 4. Déterminer le jour de la semaine pour vérifier les conflits avec les cours réguliers (seance)
+            $jour_semaine = '';
+            $timestamp = strtotime($dateEx);
+            if ($timestamp) {
+                $num_jour = date('w', $timestamp);
+                $jours_map = [
+                    0 => 'Dimanche',
+                    1 => 'Lundi',
+                    2 => 'Mardi',
+                    3 => 'Mercredi',
+                    4 => 'Jeudi',
+                    5 => 'Vendredi',
+                    6 => 'Samedi'
+                ];
+                $jour_semaine = $jours_map[$num_jour] ?? '';
+            }
+
+            $stmt_conf_seance = $pdo->prepare("SELECT id_Seance FROM seance WHERE id_salle = ? AND jour = ? AND (heurD < ? AND heurF > ?)");
+            $stmt_conf_seance->execute([$id_salle, $jour_semaine, $heurF, $heurD]);
+
+            if ($stmt_conf_sec->rowCount() > 0) {
+                $error = "Erreur : Cette section a déjà un autre examen programmé sur ce même créneau horaire !";
+            } elseif ($stmt_conf_prof->rowCount() > 0) {
+                $error = "Erreur : Ce professeur est déjà affecté à un autre examen sur ce même créneau horaire !";
+            } elseif ($stmt_conf_exam->rowCount() > 0) {
+                $error = "Erreur : Cette salle est déjà occupée par un autre examen sur ce créneau horaire !";
+            } elseif ($stmt_conf_seance->rowCount() > 0) {
+                $error = "Erreur : Cette salle est occupée par un cours régulier ($jour_semaine) sur ce créneau horaire !";
+            } else {
+                $stmt_ins = $pdo->prepare("INSERT INTO exam (id_mod, id_sec, id_prof, id_salle, type_exam, dateEx, heurD, heurF) 
+                                           VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
+                                           ON DUPLICATE KEY UPDATE 
+                                           id_prof = VALUES(id_prof), id_salle = VALUES(id_salle), type_exam = VALUES(type_exam), 
+                                           dateEx = VALUES(dateEx), heurD = VALUES(heurD), heurF = VALUES(heurF)");
+                $stmt_ins->execute([$id_mod, $id_sec, $id_prof, $id_salle, $type_exam, $dateEx, $heurD, $heurF]);
+                $message = "Planning de l'examen enregistré avec succès !";
+            }
         } else {
-            $error = "Veuillez remplir tous les champs obligatoires pour programmer l'examen.";
+            $error = "Veuillez remplir tous les champs obligatoires (y compris la salle) pour programmer l'examen.";
         }
     }
 
@@ -50,7 +100,10 @@ try {
         $message = "L'examen a été retiré du planning.";
     }
 
-    // Récupération des sections et salles pour les listes déroulantes
+    // Récupération globale pour les vérifications et listes déroulantes
+    $tous_examens = $pdo->query("SELECT id_exam, id_salle, dateEx, heurD, heurF FROM exam WHERE id_salle IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
+    $toutes_seances = $pdo->query("SELECT id_salle, jour, heurD, heurF FROM seance WHERE id_salle IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
+
     $sections = $pdo->query("SELECT sec.*, sp.NomSp, sp.annee FROM section sec JOIN specialite sp ON sec.id_sp = sp.id_sp ORDER BY sec.nom_sec ASC")->fetchAll(PDO::FETCH_ASSOC);
     $salles = $pdo->query("SELECT * FROM salle ORDER BY typeSalle, nom_salle")->fetchAll(PDO::FETCH_ASSOC);
     $profs = $pdo->query("SELECT p.id_prof, u.nom, u.prenom FROM prof p JOIN user u ON p.id_user = u.id_user ORDER BY u.nom ASC")->fetchAll(PDO::FETCH_ASSOC);
@@ -67,7 +120,6 @@ try {
         $selected_section = $stmt_sel->fetch(PDO::FETCH_ASSOC);
 
         if ($selected_section) {
-            // Récupérer les modules de la spécialité avec le prof responsable par défaut (via enseignement)
             $stmt_mods = $pdo->prepare("SELECT m.id_mod, m.Nom_mod, p.semestre, p.coefficient, e.id_prof 
                                        FROM programme p 
                                        JOIN module m ON p.id_mod = m.id_mod 
@@ -76,7 +128,6 @@ try {
             $stmt_mods->execute([$selected_section['id_sp']]);
             $modules_section = $stmt_mods->fetchAll(PDO::FETCH_ASSOC);
 
-            // Récupérer les examens déjà programmés pour cette section
             $stmt_exams = $pdo->prepare("SELECT e.*, m.Nom_mod, sal.nom_salle, u.nom as prof_nom, u.prenom as prof_prenom 
                                          FROM exam e 
                                          JOIN module m ON e.id_mod = m.id_mod 
@@ -158,13 +209,10 @@ try {
         .alert-success { background-color: #d4edda; color: #155724; padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
         .alert-error { background-color: #f8d7da; color: #721c24; padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #f5c6cb; }
 
-
-        /* Style du profil utilisateur cliquable */
         .user-menu-container { position: relative; display: inline-block; cursor: pointer; }
         .user-profile { display: flex; align-items: center; gap: 12px; }
         .user-avatar { width: 38px; height: 38px; background-color: var(--accent); color: var(--on-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
         
-        /* Dropdown du profil */
         .user-dropdown {
             display: none;
             position: absolute;
@@ -184,49 +232,12 @@ try {
         .dropdown-item { display: block; width: 100%; padding: 8px 10px; text-align: left; background: none; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; color: var(--text); margin-bottom: 5px; }
         .dropdown-item:hover { background-color: var(--bg); }
         .dropdown-item.logout { background-color: var(--error); color: var(--on-error); text-align: center; }
-        .dropdown-item.logout:hover { opacity: 0.9; }
 
-
-        .menu-dropdown {
-    position: relative;
-}
-
-.dropdown-toggle {
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-/* Le sous-menu */
-.submenu {
-    flex-direction: column;
-    gap: 4px;
-    padding-left: 15px;
-    margin-top: 4px;
-    margin-bottom: 4px;
-    border-left: 2px solid rgba(255, 255, 255, 0.2);
-}
-
-.submenu-item {
-    color: rgba(255, 255, 255, 0.85);
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 13px;
-    font-weight: 400;
-    transition: background 0.2s, color 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.submenu-item:hover, .submenu-item.active {
-    background-color: var(--accent);
-    color: var(--on-accent);
-    font-weight: 600;
-}
-    
+        .menu-dropdown { position: relative; }
+        .dropdown-toggle { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .submenu { flex-direction: column; gap: 4px; padding-left: 15px; margin-top: 4px; margin-bottom: 4px; border-left: 2px solid rgba(255, 255, 255, 0.2); }
+        .submenu-item { color: rgba(255, 255, 255, 0.85); padding: 8px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 400; display: flex; align-items: center; gap: 8px; }
+        .submenu-item:hover, .submenu-item.active { background-color: var(--accent); color: var(--on-accent); font-weight: 600; }
     </style>
 </head>
 <body>
@@ -244,37 +255,30 @@ try {
                 <a href="gestion_specialites.php" class="menu-item">📚 Spécialités & Départements</a>
                 <a href="gestion_examens.php" class="menu-item active">📅 Plannings d'examens</a>
                 <div class="menu-dropdown">
-                    <!-- Le lien principal qui déclenche l'affichage au clic -->
                     <a href="javascript:void(0);" class="menu-item dropdown-toggle" onclick="toggleSubmenu()">
                         <span>📢 Notes, Absences & Annonces</span> 
                         <span id="arrow" style="font-size: 11px;">▾</span>
                     </a>
-                    
-                    <!-- Le sous-menu masqué par défaut grâce à l'attribut style="display: none;" -->
                     <div class="submenu" id="submenuNotes" style="display: none;">
                         <a href="gestion_notes.php" class="submenu-item">📊 Notes & Moyennes</a>
                         <a href="gestion_absences.php" class="submenu-item">🚫 Absences</a>
                         <a href="gestion_annonces.php" class="submenu-item">📢 Annonces</a>
                     </div>
                 </div> 
-
               </div>
             </div>
     </div>
 
-    <!-- Main Content -->
     <div class="main-content">
         <div class="top-navbar">
             <h2>Espace Scolarité - Gestion des Examens</h2>
             
-            <!-- Profil utilisateur cliquable avec menu déroulant -->
             <div class="user-menu-container" onclick="toggleUserMenu(event)">
                 <div class="user-profile">
                     <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
                     <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['prenom'], 0, 1)); ?></div>
                 </div>
 
-                <!-- Dropdown affiché au clic -->
                 <div id="userDropdown" class="user-dropdown">
                     <div class="dropdown-header">
                         Connecté en tant que<br>
@@ -292,7 +296,6 @@ try {
             <?php if (!empty($message)): ?><div class="alert-success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
             <?php if (!empty($error)): ?><div class="alert-error"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
-            <!-- Choix de la section -->
             <div class="card">
                 <h3>1. Sélectionner une section</h3>
                 <form action="gestion_examens.php" method="GET">
@@ -336,7 +339,7 @@ try {
                                     <th>Type d'Examen</th>
                                     <th>Date</th>
                                     <th>Heure Début & Fin</th>
-                                    <th>Salle</th>
+                                    <th>Salle (Libre uniquement)</th>
                                     <th>Action</th>
                                 </tr>
                             </thead>
@@ -344,10 +347,11 @@ try {
                                 <?php foreach ($modules_section as $ms): 
                                     $ex_actuel = $examens_section[$ms['id_mod']] ?? null;
                                 ?>
-                                    <tr>
+                                    <tr class="exam-row">
                                         <form action="gestion_examens.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>" method="POST">
                                             <input type="hidden" name="id_sec" value="<?php echo $selected_section['id_Sec']; ?>">
                                             <input type="hidden" name="id_mod" value="<?php echo $ms['id_mod']; ?>">
+                                            <input type="hidden" class="exam-id" value="<?php echo $ex_actuel ? $ex_actuel['id_exam'] : ''; ?>">
 
                                             <td><strong><?php echo htmlspecialchars($ms['Nom_mod']); ?></strong></td>
                                             
@@ -374,26 +378,26 @@ try {
 
                                             <!-- Date -->
                                             <td>
-                                                <input type="date" name="dateEx" value="<?php echo $ex_actuel ? htmlspecialchars($ex_actuel['dateEx']) : ''; ?>" required style="padding: 6px; border-radius: 4px; border: 1px solid var(--border);">
+                                                <input type="date" name="dateEx" class="exam-date" value="<?php echo $ex_actuel ? htmlspecialchars($ex_actuel['dateEx']) : ''; ?>" required onchange="filtrerSallesLigne(this)" style="padding: 6px; border-radius: 4px; border: 1px solid var(--border);">
                                             </td>
 
-                                            <!-- Heure Début et Fin (l'une en dessous de l'autre) -->
+                                            <!-- Heure Début et Fin -->
                                             <td>
                                                 <div style="display: flex; flex-direction: column; gap: 6px;">
                                                     <div>
                                                         <label style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">Début :</label>
-                                                        <input type="time" name="heurD" value="<?php echo $ex_actuel ? htmlspecialchars($ex_actuel['heurD']) : ''; ?>" required style="padding: 6px; border-radius: 4px; border: 1px solid var(--border); width: 130px;">
+                                                        <input type="time" name="heurD" class="exam-heurD" value="<?php echo $ex_actuel ? htmlspecialchars($ex_actuel['heurD']) : ''; ?>" required onchange="filtrerSallesLigne(this)" style="padding: 6px; border-radius: 4px; border: 1px solid var(--border); width: 130px;">
                                                     </div>
                                                     <div>
                                                         <label style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">Fin :</label>
-                                                        <input type="time" name="heurF" value="<?php echo $ex_actuel ? htmlspecialchars($ex_actuel['heurF']) : ''; ?>" required style="padding: 6px; border-radius: 4px; border: 1px solid var(--border); width: 130px;">
+                                                        <input type="time" name="heurF" class="exam-heurF" value="<?php echo $ex_actuel ? htmlspecialchars($ex_actuel['heurF']) : ''; ?>" required onchange="filtrerSallesLigne(this)" style="padding: 6px; border-radius: 4px; border: 1px solid var(--border); width: 130px;">
                                                     </div>
                                                 </div>
                                             </td>
 
                                             <!-- Salle -->
                                             <td>
-                                                <select name="id_salle" required style="padding: 6px; border-radius: 4px; border: 1px solid var(--border);">
+                                                <select name="id_salle" class="exam-salle" required style="padding: 6px; border-radius: 4px; border: 1px solid var(--border);">
                                                     <option value="">-- Salle --</option>
                                                     <?php foreach ($salles as $sal): ?>
                                                         <option value="<?php echo $sal['id_salle']; ?>" <?php echo ($ex_actuel && $ex_actuel['id_salle'] == $sal['id_salle']) ? 'selected' : ''; ?>>
@@ -404,13 +408,12 @@ try {
                                             </td>
 
                                             <!-- Actions -->
-                                            <!-- Actions (Enregistrer et Supprimer l'un en dessous de l'autre) -->
                                             <td>
                                                 <div style="display: flex; flex-direction: column; gap: 6px;">
                                                     <button type="submit" name="enregistrer_examen" class="btn-submit" style="width: 100%; padding: 6px 12px; font-size: 12px; background-color: var(--menu);">
                                                         💾 Enregistrer
                                                     </button>
-                                                </form>
+                                        </form>
                                                     <?php if ($ex_actuel): ?>
                                                         <form action="gestion_examens.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>" method="POST" onsubmit="return confirm('Supprimer cet examen du planning ?');">
                                                             <input type="hidden" name="id_exam_to_delete" value="<?php echo $ex_actuel['id_exam']; ?>">
@@ -433,14 +436,110 @@ try {
     </div>
 
     <script>
-        // Gestion du menu déroulant de l'avatar utilisateur
+        var tousExamens = <?php echo json_encode($tous_examens); ?>;
+        var toutesSeancesExam = <?php echo json_encode($toutes_seances); ?>;
+
+        function filtrerSallesLigne(element) {
+            var row = element.closest('tr');
+            var dateInput = row.querySelector('.exam-date');
+            var heurDInput = row.querySelector('.exam-heurD');
+            var heurFInput = row.querySelector('.exam-heurF');
+            var salleSelect = row.querySelector('.exam-salle');
+            var examIdInput = row.querySelector('.exam-id');
+            
+            var dateVal = dateInput.value;
+            var heurDVal = heurDInput.value ? heurDInput.value + ':00' : '';
+            var heurFVal = heurFInput.value ? heurFInput.value + ':00' : '';
+            var currentExamId = examIdInput ? examIdInput.value : '';
+
+            var options = salleSelect.options;
+
+            if (!dateVal || !heurDVal || !heurFVal) {
+                for (var i = 0; i < options.length; i++) {
+                    if (options[i].value !== "") {
+                        options[i].style.display = 'block';
+                        options[i].disabled = false;
+                    }
+                }
+                return;
+            }
+
+            var d = new Date(dateVal);
+            var dayIndex = d.getDay();
+            var joursMap = {
+                0: 'Dimanche',
+                1: 'Lundi',
+                2: 'Mardi',
+                3: 'Mercredi',
+                4: 'Jeudi',
+                5: 'Vendredi',
+                6: 'Samedi'
+            };
+            var jourNom = joursMap[dayIndex] || '';
+
+            var sallesOccupees = [];
+
+            tousExamens.forEach(function(ex) {
+                if (ex.dateEx === dateVal && String(ex.id_exam) !== String(currentExamId)) {
+                    var exD = ex.heurD.length === 5 ? ex.heurD + ':00' : ex.heurD;
+                    var exF = ex.heurF.length === 5 ? ex.heurF + ':00' : ex.heurF;
+                    if (exD < heurFVal && exF > heurDVal) {
+                        sallesOccupees.push(parseInt(ex.id_salle));
+                    }
+                }
+            });
+
+            toutesSeancesExam.forEach(function(s) {
+                if (s.jour === jourNom) {
+                    var sD = s.heurD.length === 5 ? s.heurD + ':00' : s.heurD;
+                    var sF = s.heurF.length === 5 ? s.heurF + ':00' : s.heurF;
+                    if (sD < heurFVal && sF > heurDVal) {
+                        sallesOccupees.push(parseInt(s.id_salle));
+                    }
+                }
+            });
+
+            var currentSelectedSalle = salleSelect.value;
+            var selectedStillValid = false;
+
+            for (var i = 0; i < options.length; i++) {
+                var opt = options[i];
+                if (opt.value === "") continue;
+                
+                var salleId = parseInt(opt.value);
+
+                if (sallesOccupees.includes(salleId)) {
+                    opt.style.display = 'none';
+                    opt.disabled = true;
+                } else {
+                    opt.style.display = 'block';
+                    opt.disabled = false;
+                    if (opt.value === currentSelectedSalle) {
+                        selectedStillValid = true;
+                    }
+                }
+            }
+
+            if (!selectedStillValid) {
+                salleSelect.value = "";
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.exam-row').forEach(function(row) {
+                var dateInput = row.querySelector('.exam-date');
+                if (dateInput && dateInput.value) {
+                    filtrerSallesLigne(dateInput);
+                }
+            });
+        });
+
         function toggleUserMenu(event) {
             event.stopPropagation();
             var dropdown = document.getElementById('userDropdown');
             dropdown.classList.toggle('active');
         }
 
-        // Fermer le menu si on clique ailleurs sur la page
         window.onclick = function(event) {
             var dropdown = document.getElementById('userDropdown');
             if (dropdown && dropdown.classList.contains('active')) {
@@ -449,18 +548,17 @@ try {
         }
 
         function toggleSubmenu() {
-    var submenu = document.getElementById('submenuNotes');
-    var arrow = document.getElementById('arrow');
-    
-    if (submenu.style.display === 'none' || submenu.style.display === '') {
-        submenu.style.display = 'flex'; // Affiche le sous-menu
-        arrow.textContent = '▴';       // Change la flèche vers le haut
-    } else {
-        submenu.style.display = 'none'; // Masque le sous-menu
-        arrow.textContent = '▾';       // Change la flèche vers le bas
-    }
-}
+            var submenu = document.getElementById('submenuNotes');
+            var arrow = document.getElementById('arrow');
+            
+            if (submenu.style.display === 'none' || submenu.style.display === '') {
+                submenu.style.display = 'flex';
+                arrow.textContent = '▴';
+            } else {
+                submenu.style.display = 'none';
+                arrow.textContent = '▾';
+            }
+        }
     </script>
-
 </body>
 </html>
