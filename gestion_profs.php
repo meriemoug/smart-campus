@@ -627,7 +627,7 @@ try {
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>ID</th>
+                                        
                                         <th>Nom & Prénom</th>
                                         <th>Grade</th>
                                         <th>Département</th>
@@ -638,7 +638,6 @@ try {
                                 <tbody>
                                     <?php foreach ($professeurs as $prof): ?>
                                         <tr>
-                                            <td><strong><?php echo htmlspecialchars($prof['id_user']); ?></strong></td>
                                             <td><?php echo htmlspecialchars($prof['nom'] . ' ' . $prof['prenom']); ?></td>
                                             <td><?php echo htmlspecialchars($prof['grade']); ?></td>
                                             <td><?php echo htmlspecialchars($prof['Nom_Dep'] ?? 'Non rattaché'); ?></td>

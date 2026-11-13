@@ -372,7 +372,7 @@ try {
                     <table>
                         <thead>
                             <tr>
-                                <th>ID</th>
+                                
                                 <th>Spécialité</th>
                                 <th>Année</th>
                                 <th>Département</th>
@@ -381,8 +381,7 @@ try {
                         </thead>
                         <tbody>
                             <?php foreach ($specialites as $spec): ?>
-                                <tr style="<?php echo ($selected_specialite && $selected_specialite['id_sp'] == $spec['id_sp']) ? 'background-color: #fdf8e9;' : ''; ?>">
-                                    <td><strong><?php echo htmlspecialchars($spec['id_sp']); ?></strong></td>
+                                
                                     <td><?php echo htmlspecialchars($spec['NomSp']); ?></td>
                                     <td>Année <?php echo htmlspecialchars($spec['annee']); ?></td>
                                     <td><?php echo htmlspecialchars($spec['Nom_Dep']); ?></td>

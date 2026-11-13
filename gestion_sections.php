@@ -482,7 +482,6 @@ try {
                     <table>
                         <thead>
                             <tr>
-                                <th>ID</th>
                                 <th>Nom de la Section</th>
                                 <th>Spécialité</th>
                                 <th>Année</th>
@@ -492,8 +491,7 @@ try {
                         </thead>
                         <tbody>
                             <?php foreach ($sections as $sec): ?>
-                                <tr style="<?php echo ($selected_section && $selected_section['id_Sec'] == $sec['id_Sec']) ? 'background-color: #fdf8e9;' : ''; ?>">
-                                    <td><strong><?php echo htmlspecialchars($sec['id_Sec']); ?></strong></td>
+                                
                                     <td><?php echo htmlspecialchars($sec['nom_sec']); ?></td>
                                     <td><?php echo htmlspecialchars($sec['NomSp']); ?></td>
                                     <td>Année <?php echo htmlspecialchars($sec['annee']); ?></td>
