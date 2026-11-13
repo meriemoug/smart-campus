@@ -22,11 +22,16 @@ $seances_prof = [];
 $etudiants_groupe = [];
 $anciennes_listes = [];
 $details_liste = [];
+$sections_prof = [];
 
 $tab = $_GET['tab'] ?? 'ajouter';
 
 // Date choisie (par défaut, la date du jour)
 $date_selectionnee = $_POST['date_appel'] ?? $_GET['date_appel'] ?? date('Y-m-d');
+
+// Filtres de consultation
+$filter_date = trim($_GET['filter_date'] ?? '');
+$filter_sec = trim($_GET['filter_sec'] ?? '');
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass);
@@ -41,6 +46,18 @@ try {
     if (!$id_prof) {
         throw new Exception("Profil enseignant introuvable.");
     }
+
+    // Récupérer toutes les sections distinctes enseignées par ce professeur (utiles pour le filtre et l'affichage)
+    $stmt_sections = $pdo->prepare("
+        SELECT DISTINCT sec.id_Sec, sec.nom_sec, sp.NomSp, sp.annee
+        FROM seance s
+        JOIN section sec ON s.id_Sec = sec.id_Sec
+        LEFT JOIN specialite sp ON sec.id_sp = sp.id_sp
+        WHERE s.id_prof = ?
+        ORDER BY sec.nom_sec ASC
+    ");
+    $stmt_sections->execute([$id_prof]);
+    $sections_prof = $stmt_sections->fetchAll(PDO::FETCH_ASSOC);
 
     // Convertir la date choisie en nom de jour en français
     $jours_fr = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
@@ -159,18 +176,31 @@ try {
         $tab = 'consulter';
     }
 
-    // 7. Récupérer les anciennes listes d'appel pour l'onglet consultation
-    $stmt_anciennes = $pdo->prepare("
-        SELECT la.*, s.type_seance, s.id_groupe, m.nom_mod, sec.nom_sec, sp.NomSp, sp.annee
+    // 7. Récupérer les anciennes listes d'appel avec application des filtres de date et de section
+    $sql_anciennes = "
+        SELECT la.*, s.type_seance, s.id_groupe, m.nom_mod, sec.id_Sec, sec.nom_sec, sp.NomSp, sp.annee
         FROM liste_appel la
         JOIN seance s ON la.id_Seance = s.id_Seance
         JOIN module m ON s.id_mod = m.id_mod
         JOIN section sec ON s.id_Sec = sec.id_Sec
         LEFT JOIN specialite sp ON sec.id_sp = sp.id_sp
         WHERE la.id_prof = ?
-        ORDER BY la.date_appel DESC
-    ");
-    $stmt_anciennes->execute([$id_prof]);
+    ";
+    $params_anciennes = [$id_prof];
+
+    if (!empty($filter_date)) {
+        $sql_anciennes .= " AND la.date_appel = ?";
+        $params_anciennes[] = $filter_date;
+    }
+    if (!empty($filter_sec)) {
+        $sql_anciennes .= " AND sec.id_Sec = ?";
+        $params_anciennes[] = $filter_sec;
+    }
+
+    $sql_anciennes .= " ORDER BY la.date_appel DESC";
+
+    $stmt_anciennes = $pdo->prepare($sql_anciennes);
+    $stmt_anciennes->execute($params_anciennes);
     $anciennes_listes = $stmt_anciennes->fetchAll(PDO::FETCH_ASSOC);
 
     // Si on consulte/modifie une liste spécifique
@@ -414,6 +444,31 @@ try {
             <?php if ($tab == 'consulter' && !$edit_liste_id): ?>
                 <div class="card">
                     <h3 class="page-title">Historique des feuilles de présence</h3>
+
+                    <!-- Formulaire de filtrage par date et par section -->
+                    <form action="prof_presence.php" method="GET" class="form-grid" style="align-items: flex-end; margin-bottom: 20px; background: #fdfae7; padding: 15px; border-radius: 8px; border: 1px solid var(--border);">
+                        <input type="hidden" name="tab" value="consulter">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="filter_date">Filtrer par date :</label>
+                            <input type="date" name="filter_date" id="filter_date" value="<?php echo htmlspecialchars($filter_date); ?>">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="filter_sec">Filtrer par section :</label>
+                            <select name="filter_sec" id="filter_sec">
+                                <option value="">-- Toutes les sections --</option>
+                                <?php foreach ($sections_prof as $sec): ?>
+                                    <option value="<?php echo $sec['id_Sec']; ?>" <?php echo ($filter_sec == $sec['id_Sec']) ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($sec['nom_sec'] . ' (' . $sec['NomSp'] . ' - ' . $sec['annee'] . ')'); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 10px; grid-column: span 2;">
+                            <button type="submit" class="btn-action">🔍 Filtrer</button>
+                            <a href="prof_presence.php?tab=consulter" style="background: #64748b; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-flex; align-items: center;">Réinitialiser</a>
+                        </div>
+                    </form>
+
                     <table class="presence-table">
                         <thead>
                             <tr>
@@ -445,7 +500,7 @@ try {
                                 <?php endforeach; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="6" style="text-align: center; color: #777; padding: 20px;">Aucune feuille de présence enregistrée pour le moment.</td>
+                                    <td colspan="6" style="text-align: center; color: #777; padding: 20px;">Aucune feuille de présence trouvée avec ces critères.</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
