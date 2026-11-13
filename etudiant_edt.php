@@ -55,10 +55,11 @@ try {
 .tp{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;color:#fff;background:var(--header);margin-bottom:3px}
 .tp.TD{background:#2e7d32}.tp.TP{background:#8a5300}
 .legend{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0 16px;font-size:13px;align-items:center}
-.toggle{margin-left:auto;font-weight:600;color:var(--menu)}
+.toggle{font-weight:600;color:var(--menu);text-decoration:none}
+.btn-pdf{background:var(--header);color:var(--on-blue);padding:6px 14px;border-radius:6px;text-decoration:none;font-weight:600;margin-left:auto;display:inline-flex;align-items:center;gap:6px}
+.btn-pdf:hover{background:var(--menu)}
 </style>
 
-<!--<h3 class="section-title">Emploi du temps</h3> -->
 <p class="muted" style="margin-bottom:6px">
   Section <strong><?php echo htmlspecialchars($etu['nom_sec'] ?? '-'); ?></strong> · Groupe <strong><?php echo (int)$etu['groupe']; ?></strong>
   · <?php echo htmlspecialchars($etu['NomSp'] ?? ''); ?>
@@ -72,6 +73,9 @@ try {
   <span><span class="tp TP">TP</span> votre groupe</span>
   <a class="toggle" href="etudiant_edt.php<?php echo $tous_groupes ? '' : '?tous=1'; ?>">
     <?php echo $tous_groupes ? '👤 Voir uniquement mon groupe' : '👥 Voir tous les groupes'; ?>
+  </a>
+  <a class="btn-pdf" href="etudiant_edt_pdf.php<?php echo $tous_groupes ? '?tous=1' : ''; ?>" target="_blank">
+    📥 Télécharger en PDF
   </a>
 </div>
 
