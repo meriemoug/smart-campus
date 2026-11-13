@@ -57,16 +57,16 @@ try {
         ];
     }
 
-    // 3. Si une section est sélectionnée, récupérer UNIQUEMENT les modules enseignés par ce prof pour CETTE section
+    // 3. Si une section est sélectionnée, récupérer UNIQUEMENT les modules enseignés par ce prof pour CETTE section précise
     if (!empty($selected_section)) {
         $stmt_modules = $pdo->prepare("
             SELECT DISTINCT m.id_mod, m.nom_mod
             FROM enseignement en
             JOIN module m ON en.id_mod = m.id_mod
-            WHERE en.id_prof = ?
+            WHERE en.id_prof = ? AND en.id_Sec = ?
             ORDER BY m.nom_mod ASC
         ");
-        $stmt_modules->execute([$id_prof]);
+        $stmt_modules->execute([$id_prof, $selected_section]);
         $modules_result = $stmt_modules->fetchAll(PDO::FETCH_ASSOC);
 
         foreach ($modules_result as $mod) {
@@ -213,7 +213,6 @@ try {
                 <a href="prof_planning_examens.php" class="menu-item"><span>📋</span> Planning des Examens</a>
             </div>
         </div>
-
     </div>
 
     <!-- Main Content -->
