@@ -645,7 +645,14 @@ try {
                                             <td style="vertical-align: middle;">
                                                 <div style="display: flex; align-items: center; gap: 6px;">
                                                     <!-- Bouton Modifier -->
-                                                    <button type="button" class="btn-edit" style="margin: 0;" onclick="ouvrirModalEdit(...)">
+                                                    <button type="button" class="btn-edit" style="margin: 0;" onclick="ouvrirModalEdit(
+                                                       '<?php echo htmlspecialchars($prof['id_user']); ?>',
+                                                       '<?php echo addslashes($prof['nom']); ?>',
+                                                       '<?php echo addslashes($prof['prenom']); ?>',
+                                                       '<?php echo addslashes($prof['email']); ?>',
+                                                       '<?php echo addslashes($prof['grade']); ?>',
+                                                       '<?php echo htmlspecialchars($prof['id_Dep'] ?? ''); ?>'
+                                                        )">
                                                         Modf
                                                     </button>
 
