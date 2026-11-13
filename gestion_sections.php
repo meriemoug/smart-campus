@@ -609,7 +609,6 @@ $creneaux = [
                     </div>
 
                     <h4 style="margin-bottom: 10px; color: var(--header);">📅 Emploi du temps (Cliquez sur une case pour ajouter une séance)</h4>
-                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 15px;">Horaires : 08h00 à 17h50 (Séances de 1h30 + 10 min de pause inter-séances).</p>
 
                     <div style="overflow-x: auto;">
                         <table class="edt-table">
