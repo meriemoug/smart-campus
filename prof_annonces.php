@@ -392,13 +392,7 @@ try {
                                 </select>
                             </div>
 
-                            <div class="form-group full-width">
-                                <label for="image_annonce">Illustration / Photo (Optionnel) :</label>
-                                <input type="file" id="image_annonce" name="image_annonce" accept="image/*">
-                                <?php if (!empty($edit_annonce['image'])): ?>
-                                    <small style="color: #64748b; margin-top: 4px;">Image actuelle : <a href="<?php echo htmlspecialchars($edit_annonce['image']); ?>" target="_blank">Voir l'image</a></small>
-                                <?php endif; ?>
-                            </div>
+                            
 
                             <div class="form-group full-width">
                                 <label for="det">Détails / Contenu de l'annonce :</label>
