@@ -31,6 +31,7 @@ $menu = [
     'etudiant_examens.php'   => '🗓️ Planning des examens',
     'etudiant_ressources.php'=> '📚 Ressources pédagogiques',
     'etudiant_releve.php'    => '🎓 Relevé de notes',
+    'etudiant_assistant.php' => '🤖 Mon assistant',
     'etudiant_faq.php'       => '❓ FAQ',
 ];
 $page_active = $page_active ?? '';
