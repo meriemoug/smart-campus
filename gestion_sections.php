@@ -24,6 +24,7 @@ $toutes_seances = [];
 $default_profs_names = [];
 $filter_sp = '';
 $filter_annee = '';
+$filter_sp_label = '';
 $notifications = [];
 $nb_non_lus = 0;
 $id_user_connecte = $_SESSION['id_user'];
@@ -92,10 +93,10 @@ try {
         if ($id_Sec_del > 0) {
             $pdo->prepare("DELETE FROM seance WHERE id_Sec = ?")->execute([$id_Sec_del]);
             $pdo->prepare("DELETE FROM enseignement WHERE id_Sec = ?")->execute([$id_Sec_del]);
-            
+
             $stmt_del_sec = $pdo->prepare("DELETE FROM section WHERE id_Sec = ?");
             $stmt_del_sec->execute([$id_Sec_del]);
-            
+
             $message = "La section a été supprimée avec succès.";
             if (isset($_GET['id_sec_selected']) && $_GET['id_sec_selected'] == $id_Sec_del) {
                 $_GET['id_sec_selected'] = null;
@@ -191,7 +192,7 @@ try {
             $stmt_chk_p = $pdo->prepare("SELECT p.id_prof FROM prof p JOIN user u ON p.id_user = u.id_user WHERE CONCAT(u.nom, ' ', u.prenom) = ? OR CONCAT(u.prenom, ' ', u.nom) = ? OR u.nom = ?");
             $stmt_chk_p->execute([$nom_prof_saisi, $nom_prof_saisi, $nom_prof_saisi]);
             $p_data = $stmt_chk_p->fetch(PDO::FETCH_ASSOC);
-            
+
             if ($p_data) {
                 $id_prof = $p_data['id_prof'];
             } else {
@@ -208,7 +209,7 @@ try {
         } elseif ($type_seance !== 'cours' && (empty($id_groupe) || $id_groupe < 1 || $id_groupe > $sec_info['nombre_groupes'])) {
             $error = "Erreur : Pour un " . strtoupper($type_seance) . ", le groupe doit être compris entre 1 et " . $sec_info['nombre_groupes'] . ".";
         } elseif ($id_Sec > 0 && !empty($jour) && !empty($heurD) && !empty($heurF) && $id_mod > 0 && $id_salle > 0) {
-            
+
             $stmt_conflict_room = $pdo->prepare("SELECT id_Seance FROM seance WHERE id_salle = ? AND jour = ? AND (heurD < ? AND heurF > ?)");
             $stmt_conflict_room->execute([$id_salle, $jour, $heurF, $heurD]);
 
@@ -235,8 +236,7 @@ try {
             } else {
                 $stmt_ins_s = $pdo->prepare("INSERT INTO seance (id_Sec, id_salle, id_prof, id_mod, type_seance, jour, heurD, heurF, id_groupe) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $stmt_ins_s->execute([$id_Sec, $id_salle, $id_prof, $id_mod, $type_seance, $jour, $heurD, $heurF, ($type_seance === 'cours' ? null : $id_groupe)]);
-                
-                // --- NOTIFICATION : AJOUT DE SÉANCE ---
+
                 $stmt_m_info = $pdo->prepare("SELECT Nom_mod FROM module WHERE id_mod = ?");
                 $stmt_m_info->execute([$id_mod]);
                 $mod_nom = $stmt_m_info->fetchColumn();
@@ -248,7 +248,6 @@ try {
                 $horaire_formate = substr($heurD, 0, 5) . ' - ' . substr($heurF, 0, 5);
                 $groupe_texte = ($id_groupe ? " (Groupe $id_groupe)" : "");
 
-                // 1. Notifier les étudiants de la section
                 $stmt_etu = $pdo->prepare("SELECT u.id_user FROM user u JOIN etudiant e ON u.id_user = e.id_user WHERE e.id_Sec = ?");
                 $stmt_etu->execute([$id_Sec]);
                 $etudiants_users = $stmt_etu->fetchAll(PDO::FETCH_COLUMN);
@@ -259,7 +258,6 @@ try {
                     $stmt_notif->execute([$uid_etu, $msg_etu]);
                 }
 
-                // 2. Notifier le professeur s'il est assigné
                 if (!empty($id_prof)) {
                     $stmt_p_user = $pdo->prepare("SELECT id_user FROM prof WHERE id_prof = ?");
                     $stmt_p_user->execute([$id_prof]);
@@ -270,7 +268,6 @@ try {
                         $stmt_notif->execute([$prof_user_id, $msg_prof]);
                     }
                 }
-                // --- FIN NOTIFICATION ---
 
                 $message = "Séance ajoutée avec succès à l'emploi du temps !";
             }
@@ -282,7 +279,7 @@ try {
     // 4. Suppression d'une séance unitaire (AVEC NOTIFICATIONS)
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer_seance'])) {
         $id_Seance_del = intval($_POST['id_Seance_to_delete'] ?? 0);
-        
+
         if ($id_Seance_del > 0) {
             $stmt_info_del = $pdo->prepare("
                 SELECT s.*, m.Nom_mod, sec.nom_sec 
@@ -297,8 +294,7 @@ try {
             if ($s_info) {
                 $horaire_formate = substr($s_info['heurD'], 0, 5) . ' - ' . substr($s_info['heurF'], 0, 5);
                 $groupe_texte = ($s_info['id_groupe'] ? " (Groupe {$s_info['id_groupe']})" : "");
-                
-                // 1. Notifier les étudiants de la section
+
                 $stmt_etu = $pdo->prepare("SELECT u.id_user FROM user u JOIN etudiant e ON u.id_user = e.id_user WHERE e.id_Sec = ?");
                 $stmt_etu->execute([$s_info['id_Sec']]);
                 $etudiants_users = $stmt_etu->fetchAll(PDO::FETCH_COLUMN);
@@ -309,7 +305,6 @@ try {
                     $stmt_notif->execute([$uid_etu, $msg_etu]);
                 }
 
-                // 2. Notifier le professeur associé si présent
                 if (!empty($s_info['id_prof'])) {
                     $stmt_p_user = $pdo->prepare("SELECT id_user FROM prof WHERE id_prof = ?");
                     $stmt_p_user->execute([$s_info['id_prof']]);
@@ -328,26 +323,46 @@ try {
     }
 
     // Données globales
-    $specialites = $pdo->query("SELECT * FROM specialite ORDER BY NomSp ASC")->fetchAll(PDO::FETCH_ASSOC);
+    $specialites = $pdo->query("SELECT * FROM specialite ORDER BY NomSp ASC, annee ASC")->fetchAll(PDO::FETCH_ASSOC);
     $profs = $pdo->query("SELECT p.id_prof, u.nom, u.prenom FROM prof p JOIN user u ON p.id_user = u.id_user ORDER BY u.nom ASC")->fetchAll(PDO::FETCH_ASSOC);
     $salles = $pdo->query("SELECT * FROM salle ORDER BY typeSalle, nom_salle")->fetchAll(PDO::FETCH_ASSOC);
-
     $toutes_seances = $pdo->query("SELECT id_salle, jour, heurD, heurF FROM seance")->fetchAll(PDO::FETCH_ASSOC);
 
     $filter_sp = trim($_GET['filter_sp'] ?? '');
     $filter_annee = trim($_GET['filter_annee'] ?? '');
+    $filter_sp_label = trim($_GET['filter_sp_text'] ?? '');
 
-    $sql_sec = "SELECT sec.*, sp.NomSp, sp.annee FROM section sec LEFT JOIN specialite sp ON sec.id_sp = sp.id_sp WHERE 1=1";
+    if (!empty($filter_sp)) {
+        foreach ($specialites as $sp_item) {
+            if ((string)$sp_item['id_sp'] === (string)$filter_sp) {
+                if ($filter_sp_label === '') {
+                    $filter_sp_label = $sp_item['NomSp'] . ' - Année ' . $sp_item['annee'];
+                }
+                break;
+            }
+        }
+    }
+
+    $sql_sec = "SELECT sec.*, sp.NomSp, sp.annee 
+                FROM section sec 
+                LEFT JOIN specialite sp ON sec.id_sp = sp.id_sp 
+                WHERE 1=1";
     $params_sec = [];
 
     if (!empty($filter_sp)) {
         $sql_sec .= " AND sec.id_sp = ?";
         $params_sec[] = $filter_sp;
+    } elseif (!empty($filter_sp_label)) {
+        $sql_sec .= " AND CONCAT(sp.NomSp, ' - Année ', sp.annee) LIKE ?";
+        $params_sec[] = '%' . $filter_sp_label . '%';
     }
+
     if (!empty($filter_annee)) {
         $sql_sec .= " AND sp.annee = ?";
         $params_sec[] = $filter_annee;
     }
+
+    $sql_sec .= " ORDER BY sp.annee ASC, sp.NomSp ASC, sec.nom_sec ASC";
 
     $stmt_sec = $pdo->prepare($sql_sec);
     $stmt_sec->execute($params_sec);
@@ -372,8 +387,8 @@ try {
             $stmt_mods->execute([$selected_section['id_Sec'], $selected_section['id_sp']]);
             $modules_section = $stmt_mods->fetchAll(PDO::FETCH_ASSOC);
 
-            foreach($modules_section as $ms) {
-                if(!empty($ms['prof_nom'])) {
+            foreach ($modules_section as $ms) {
+                if (!empty($ms['prof_nom'])) {
                     $default_profs_names[$ms['id_mod']] = trim($ms['prof_nom'] . ' ' . $ms['prof_prenom']);
                 }
             }
@@ -388,7 +403,7 @@ try {
                                            WHERE s.id_Sec = ?");
             $stmt_seances->execute([$id_sec_selected]);
             $raw_seances = $stmt_seances->fetchAll(PDO::FETCH_ASSOC);
-            
+
             foreach ($raw_seances as $rs) {
                 $creneau_key = substr($rs['heurD'], 0, 5) . ' - ' . substr($rs['heurF'], 0, 5);
                 $seances_grid[$rs['jour']][$creneau_key][] = $rs;
@@ -409,6 +424,13 @@ $creneaux = [
     ['14:40', '16:10'],
     ['16:20', '17:50']
 ];
+
+$specialites_filtre_js = array_map(function($sp) {
+    return [
+        'id_sp' => (string)$sp['id_sp'],
+        'label' => $sp['NomSp'] . ' - Année ' . $sp['annee']
+    ];
+}, $specialites);
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -458,6 +480,37 @@ $creneaux = [
         .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
         .form-group input, .form-group select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background-color: #FAFCFE; }
 
+        .suggestions-box {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #FFFFFF;
+            border: 1px solid var(--border);
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            max-height: 210px;
+            overflow-y: auto;
+            z-index: 500;
+            box-shadow: 0 6px 14px rgba(0,0,0,0.08);
+        }
+        .suggestion-item {
+            padding: 10px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            border-bottom: 1px solid #f1f5f9;
+            color: var(--text);
+        }
+        .suggestion-item:hover {
+            background-color: #fdf8e9;
+        }
+        .suggestion-empty {
+            padding: 10px 12px;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
         .btn-submit { background-color: var(--header); color: var(--on-blue); border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; transition: background 0.2s; }
         .btn-submit:hover { background-color: var(--menu); }
         .btn-edit { background-color: var(--menu); color: var(--on-blue); padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 600; text-decoration: none; display: inline-block; cursor: pointer; border: none; }
@@ -492,11 +545,11 @@ $creneaux = [
 
         #modalSeance, #modalModifierSection { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
         .modal-content { background: white; padding: 25px; border-radius: 10px; width: 450px; max-width: 90%; }
-    
+
         .user-menu-container, .notif-menu-container { position: relative; display: inline-block; cursor: pointer; }
         .user-profile { display: flex; align-items: center; gap: 12px; }
         .user-avatar { width: 38px; height: 38px; background-color: var(--accent); color: var(--on-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 15px; }
-        
+
         .user-dropdown {
             display: none;
             position: absolute;
@@ -555,7 +608,7 @@ $creneaux = [
                         <a href="gestion_annonces.php" class="submenu-item">📢 Annonces</a>
                     </div>
                 </div> 
-              </div>
+            </div>
         </div>
     </div>
 
@@ -564,7 +617,6 @@ $creneaux = [
             <h2>Espace Scolarité - Gestion des Sections et Emplois du temps</h2>
 
             <div style="display: flex; align-items: center; gap: 15px;">
-                <!-- Conteneur des notifications -->
                 <div class="notif-menu-container" onclick="toggleNotifMenu(event)">
                     <div style="font-size: 20px; position: relative;">
                         🔔
@@ -573,7 +625,6 @@ $creneaux = [
                         <?php endif; ?>
                     </div>
 
-                    <!-- Dropdown des notifications -->
                     <div id="notifDropdown" class="user-dropdown" style="width: 320px; max-height: 400px; overflow-y: auto; right: 0; left: auto;">
                         <div class="dropdown-header" style="display: flex; justify-content: space-between; align-items: center;">
                             <span>Notifications</span>
@@ -581,7 +632,7 @@ $creneaux = [
                                 <span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 10px; font-size: 11px;"><?= $nb_non_lus ?> non lue(s)</span>
                             <?php endif; ?>
                         </div>
-                        
+
                         <?php if (empty($notifications)): ?>
                             <div style="padding: 15px; text-align: center; color: #64748b; font-size: 13px;">Aucune notification pour le moment.</div>
                         <?php else: ?>
@@ -594,7 +645,7 @@ $creneaux = [
                         <?php endif; ?>
                     </div>
                 </div>
-            
+
                 <div class="user-menu-container" onclick="toggleUserMenu(event)">
                     <div class="user-profile">
                         <span><strong><?php echo htmlspecialchars($_SESSION['prenom'] . ' ' . $_SESSION['nom']); ?></strong></span>
@@ -646,23 +697,30 @@ $creneaux = [
 
                 <div class="card">
                     <h3>Rechercher / Filtrer les sections</h3>
-                    <form action="gestion_sections.php" method="GET">
-                        <div class="form-group">
-                            <label for="filter_sp">Filtrer par Spécialité</label>
-                            <select id="filter_sp" name="filter_sp">
-                                <option value="">-- Toutes les spécialités --</option>
-                                <?php foreach ($specialites as $sp): ?>
-                                    <option value="<?php echo $sp['id_sp']; ?>" <?php echo ($filter_sp == $sp['id_sp']) ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($sp['NomSp']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
+                    <form action="gestion_sections.php" method="GET" id="formFiltreSection" autocomplete="off">
+                        <div class="form-group" style="position: relative;">
+                            <label for="input_sp_recherche">Spécialité - Année</label>
+                            <input
+                                type="text"
+                                id="input_sp_recherche"
+                                name="filter_sp_text"
+                                value="<?php echo htmlspecialchars($filter_sp_label); ?>"
+                                placeholder="Tapez les lettres de la spécialité..."
+                                oninput="afficherSuggestionsSp()"
+                            >
+                            <input type="hidden" id="filter_sp" name="filter_sp" value="<?php echo htmlspecialchars($filter_sp); ?>">
+
+                            <div id="suggestions_sp" class="suggestions-box"></div>
                         </div>
-                        <div class="form-group">
-                            <label for="filter_annee">Filtrer par Année</label>
-                            <input type="number" id="filter_annee" name="filter_annee" min="1" max="5" value="<?php echo htmlspecialchars($filter_annee); ?>" placeholder="Ex: 2">
+
+                        <div style="display: flex; gap: 10px;">
+                            <button type="submit" class="btn-submit" style="background-color: var(--menu);">Filtrer</button>
+                            <?php if (!empty($filter_sp) || !empty($filter_sp_label) || !empty($filter_annee)): ?>
+                                <a href="gestion_sections.php" class="btn-submit" style="background-color: #6c757d; text-decoration: none; text-align: center; width: auto; padding: 10px 16px;">
+                                    Réinitialiser
+                                </a>
+                            <?php endif; ?>
                         </div>
-                        <button type="submit" class="btn-submit" style="background-color: var(--menu);">Filtrer</button>
                     </form>
                 </div>
             </div>
@@ -690,13 +748,13 @@ $creneaux = [
                                     <td>Année <?php echo htmlspecialchars($sec['annee']); ?></td>
                                     <td><?php echo htmlspecialchars($sec['nombre_groupes']); ?> groupe(s)</td>
                                     <td style="display: flex; gap: 8px; align-items: center;">
-                                        <a href="gestion_sections.php?id_sec_selected=<?php echo $sec['id_Sec']; ?>&filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" class="btn-edit">
+                                        <a href="gestion_sections.php?id_sec_selected=<?php echo $sec['id_Sec']; ?>&filter_sp=<?php echo urlencode($filter_sp); ?>&filter_sp_text=<?php echo urlencode($filter_sp_label); ?>&filter_annee=<?php echo urlencode($filter_annee); ?>" class="btn-edit">
                                             ⚙️ Gérer l'EDT & Profs
                                         </a>
                                         <button type="button" class="btn-edit" style="background-color: var(--header);" onclick="ouvrirModalModifierSection(<?php echo $sec['id_Sec']; ?>, '<?php echo htmlspecialchars(addslashes($sec['nom_sec'])); ?>', '<?php echo $sec['id_sp']; ?>', <?php echo $sec['nombre_groupes']; ?>)">
                                             ✏️ Modifier
                                         </button>
-                                        <form action="gestion_sections.php?filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" method="POST" style="display:inline; margin:0;">
+                                        <form action="gestion_sections.php?filter_sp=<?php echo urlencode($filter_sp); ?>&filter_sp_text=<?php echo urlencode($filter_sp_label); ?>&filter_annee=<?php echo urlencode($filter_annee); ?>" method="POST" style="display:inline; margin:0;">
                                             <input type="hidden" name="id_Sec_to_delete" value="<?php echo $sec['id_Sec']; ?>">
                                             <button type="submit" name="supprimer_section" class="btn-delete" onclick="return confirm('Attention : La suppression de cette section supprimera également ses séances associées. Voulez-vous continuer ?');">
                                                 🗑️ Supprimer
@@ -714,16 +772,16 @@ $creneaux = [
                 <div class="card" style="border: 2px solid var(--accent); background-color: #fffdf9;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                         <h3 style="color: var(--header);">
-                            ⚙️ Section : <span style="color: var(--menu);"><?php echo htmlspecialchars($selected_section['nom_sec']); ?></span> (<?php echo htmlspecialchars($selected_section['NomSp']); ?>)
+                            ⚙️ Section : <span style="color: var(--menu);"><?php echo htmlspecialchars($selected_section['nom_sec']); ?></span> (<?php echo htmlspecialchars($selected_section['NomSp'] . ' - Année ' . $selected_section['annee']); ?>)
                         </h3>
                         <div style="display: flex; gap: 15px; align-items: center;">
-                            <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>&filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" method="POST" style="margin:0;" onsubmit="return confirm('Attention : Voulez-vous vraiment supprimer tout l\'emploi du temps de cette section ? Cette action est irréversible.');">
+                            <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>&filter_sp=<?php echo urlencode($filter_sp); ?>&filter_sp_text=<?php echo urlencode($filter_sp_label); ?>&filter_annee=<?php echo urlencode($filter_annee); ?>" method="POST" style="margin:0;" onsubmit="return confirm('Attention : Voulez-vous vraiment supprimer tout l\'emploi du temps de cette section ? Cette action est irréversible.');">
                                 <input type="hidden" name="id_Sec_edt" value="<?php echo $selected_section['id_Sec']; ?>">
                                 <button type="submit" name="supprimer_edt" class="btn-delete" style="padding: 7px 12px; font-size: 13px;">
                                     🗑️ Supprimer tout l'EDT
                                 </button>
                             </form>
-                            <a href="gestion_sections.php" style="color: var(--text-muted); text-decoration: none; font-size: 13px;">❌ Fermer</a>
+                            <a href="gestion_sections.php?filter_sp=<?php echo urlencode($filter_sp); ?>&filter_sp_text=<?php echo urlencode($filter_sp_label); ?>&filter_annee=<?php echo urlencode($filter_annee); ?>" style="color: var(--text-muted); text-decoration: none; font-size: 13px;">❌ Fermer</a>
                         </div>
                     </div>
 
@@ -763,7 +821,7 @@ $creneaux = [
                                                 <?php endif; ?>
                                             </td>
                                             <td>
-                                                <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>&filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" method="POST" style="display: flex; gap: 8px; align-items: center; margin: 0;">
+                                                <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>&filter_sp=<?php echo urlencode($filter_sp); ?>&filter_sp_text=<?php echo urlencode($filter_sp_label); ?>&filter_annee=<?php echo urlencode($filter_annee); ?>" method="POST" style="display: flex; gap: 8px; align-items: center; margin: 0;">
                                                     <input type="hidden" name="id_mod_target" value="<?php echo $ms['id_mod']; ?>">
                                                     <input type="text" name="nom_prof_saisi" list="liste_professeurs" value="<?php echo htmlspecialchars($nom_prof_actuel); ?>" placeholder="Tapez le nom du prof..." style="padding: 7px; border-radius: 6px; border: 1px solid var(--border); flex: 1; background: #FAFCFE; font-size: 13px;">
                                                     <button type="submit" name="modifier_prof_module" class="btn-submit" style="width: auto; padding: 7px 12px; font-size: 12px; background-color: var(--menu); white-space: nowrap;">
@@ -807,7 +865,7 @@ $creneaux = [
                                                         echo '🏛️ ' . htmlspecialchars($s['nom_salle']) . '<br>';
                                                         $affichage_prof = (!empty($s['prof_nom'])) ? htmlspecialchars($s['prof_nom'] . ' ' . $s['prof_prenom']) : '<em style="color: var(--text-muted);">Non assigné</em>';
                                                         echo '👨‍🏫 ' . $affichage_prof;
-                                                        echo '<form method="POST" action="gestion_sections.php?id_sec_selected=' . $selected_section['id_Sec'] . '">
+                                                        echo '<form method="POST" action="gestion_sections.php?id_sec_selected=' . $selected_section['id_Sec'] . '&filter_sp=' . urlencode($filter_sp) . '&filter_sp_text=' . urlencode($filter_sp_label) . '&filter_annee=' . urlencode($filter_annee) . '">
                                                         <input type="hidden" name="id_Seance_to_delete" value="' . $s['id_Seance'] . '">
                                                         <button type="submit" name="supprimer_seance" class="btn-del-x" title="Supprimer cette séance" aria-label="Supprimer cette séance" onclick="event.stopPropagation(); return confirm(\'Supprimer cette séance ?\');">✕</button>
                                                         </form>';
@@ -834,9 +892,9 @@ $creneaux = [
     <div id="modalSeance">
         <div class="modal-content">
             <h3 style="margin-bottom: 15px; color: var(--header);">Planifier une séance</h3>
-            <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>" method="POST">
+            <form action="gestion_sections.php?id_sec_selected=<?php echo $selected_section['id_Sec']; ?>&filter_sp=<?php echo urlencode($filter_sp); ?>&filter_sp_text=<?php echo urlencode($filter_sp_label); ?>&filter_annee=<?php echo urlencode($filter_annee); ?>" method="POST">
                 <input type="hidden" name="id_Sec" value="<?php echo $selected_section['id_Sec']; ?>">
-                
+
                 <div class="form-group">
                     <label>Jour & Créneau</label>
                     <input type="text" id="modal_jour_horaire_display" readonly style="background-color: #eee;">
@@ -899,9 +957,9 @@ $creneaux = [
     <div id="modalModifierSection">
         <div class="modal-content">
             <h3 style="margin-bottom: 15px; color: var(--header);">Modifier la section</h3>
-            <form action="gestion_sections.php?filter_sp=<?php echo $filter_sp; ?>&filter_annee=<?php echo $filter_annee; ?>" method="POST">
+            <form action="gestion_sections.php?filter_sp=<?php echo urlencode($filter_sp); ?>&filter_sp_text=<?php echo urlencode($filter_sp_label); ?>&filter_annee=<?php echo urlencode($filter_annee); ?>" method="POST">
                 <input type="hidden" id="edit_id_Sec" name="id_Sec">
-                
+
                 <div class="form-group">
                     <label for="edit_nom_sec">Nom de la section</label>
                     <input type="text" id="edit_nom_sec" name="nom_sec" required>
@@ -933,9 +991,54 @@ $creneaux = [
     <script>
         var defaultProfsNames = <?php echo json_encode($default_profs_names); ?>;
         var toutesSeances = <?php echo json_encode($toutes_seances); ?>;
+        var listeSpecialitesFiltre = <?php echo json_encode($specialites_filtre_js); ?>;
         var currentJour = '';
         var currentHeurD = '';
         var currentHeurF = '';
+
+        function afficherSuggestionsSp() {
+            var inputText = document.getElementById('input_sp_recherche');
+            var hiddenId = document.getElementById('filter_sp');
+            var box = document.getElementById('suggestions_sp');
+
+            hiddenId.value = '';
+
+            var terme = inputText.value.toLowerCase();
+            if (terme.trim() === '') {
+                box.innerHTML = '';
+                box.style.display = 'none';
+                return;
+            }
+
+            var resultats = listeSpecialitesFiltre.filter(function(item) {
+                return item.label.toLowerCase().indexOf(terme) !== -1;
+            });
+
+            box.innerHTML = '';
+
+            if (resultats.length === 0) {
+                box.innerHTML = '<div class="suggestion-empty">Aucune spécialité correspondante</div>';
+                box.style.display = 'block';
+                return;
+            }
+
+            resultats.forEach(function(item) {
+                var div = document.createElement('div');
+                div.className = 'suggestion-item';
+                div.textContent = item.label;
+
+                div.onclick = function() {
+                    inputText.value = item.label;
+                    hiddenId.value = item.id_sp;
+                    box.style.display = 'none';
+                    document.getElementById('formFiltreSection').submit();
+                };
+
+                box.appendChild(div);
+            });
+
+            box.style.display = 'block';
+        }
 
         function ouvrirModalModifierSection(id, nom, idSp, nbGroupes) {
             document.getElementById('edit_id_Sec').value = id;
@@ -994,7 +1097,7 @@ $creneaux = [
                 var opt = options[i];
                 var optType = opt.getAttribute('data-type');
                 var optId = parseInt(opt.getAttribute('data-id'));
-                
+
                 if (!optType) continue;
 
                 var matchType = false;
@@ -1003,7 +1106,7 @@ $creneaux = [
                     matchType = true;
                 } else if (typeSeance === 'TD' && optType === 'TD') {
                     matchType = true;
-                } else if (typeSeance === 'TP' && optType === 'TP' ) {
+                } else if (typeSeance === 'TP' && optType === 'TP') {
                     matchType = true;
                 }
 
@@ -1028,7 +1131,7 @@ $creneaux = [
                 groupeInput.value = '';
             }
         }
-        
+
         function toggleUserMenu(event) {
             event.stopPropagation();
             var userDropdown = document.getElementById('userDropdown');
@@ -1054,12 +1157,17 @@ $creneaux = [
             if (notifDropdown && notifDropdown.classList.contains('active')) {
                 notifDropdown.classList.remove('active');
             }
+            var box = document.getElementById('suggestions_sp');
+            var inputText = document.getElementById('input_sp_recherche');
+            if (box && inputText && !box.contains(event.target) && event.target !== inputText) {
+                box.style.display = 'none';
+            }
         }
 
         function toggleSubmenu() {
             var submenu = document.getElementById('submenuNotes');
             var arrow = document.getElementById('arrow');
-            
+
             if (submenu.style.display === 'none' || submenu.style.display === '') {
                 submenu.style.display = 'flex';
                 arrow.textContent = '▴';
