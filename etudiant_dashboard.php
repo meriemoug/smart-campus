@@ -46,7 +46,7 @@ try {
 ?>
 <?php if ($error): ?><div class="alert-error"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
-<h3 class="section-title">Bonjour <?php echo htmlspecialchars($_SESSION['prenom'] ?? ''); ?> 👋</h3>
+<h3 class="section-title">Bonjour <?php echo htmlspecialchars($_SESSION['prenom'] ?? ''); ?> </h3>
 
 <div class="grid">
   <!-- Annonces -->

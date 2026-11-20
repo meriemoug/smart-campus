@@ -32,7 +32,7 @@ $menu = [
     'etudiant_ressources.php'=> '📚 Ressources pédagogiques',
     'etudiant_releve.php'    => '🎓 Relevé de notes',
     'etudiant_assistant.php' => '🤖 Mon assistant',
-    'etudiant_faq.php'       => '❓ FAQ',
+    
 ];
 $page_active = $page_active ?? '';
 $page_title  = $page_title ?? 'Espace Étudiant';
@@ -90,7 +90,7 @@ body{background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:h
 <body>
 <div class="sidebar">
   <div>
-    <div class="logo-area">🎓 Smart Campus (Étudiant)</div>
+    <div class="logo-area">🎓 Smart Campus </div>
     <nav class="menu" aria-label="Menu principal">
       <?php foreach ($menu as $file => $label): ?>
         <a href="<?php echo $file; ?>" class="menu-item <?php echo $file === $page_active ? 'active' : ''; ?>"><?php echo $label; ?></a>
